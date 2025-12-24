@@ -1,8 +1,26 @@
+import sys
+from pathlib import Path
+
+# 支持直接运行：添加 src 目录到 Python 路径
+src_dir = Path(__file__).parent.parent
+if str(src_dir) not in sys.path:
+    sys.path.insert(0, str(src_dir))
+
 from fastmcp import FastMCP, Context
-from .providers.grok import GrokSearchProvider
-from .utils import format_search_results
-from .logger import log_info
-from .config import config
+
+# 尝试使用绝对导入（支持 mcp run）
+try:
+    from grok_search.providers.grok import GrokSearchProvider
+    from grok_search.utils import format_search_results
+    from grok_search.logger import log_info
+    from grok_search.config import config
+except ImportError:
+    # 降级到相对导入（pip install -e . 后）
+    from .providers.grok import GrokSearchProvider
+    from .utils import format_search_results
+    from .logger import log_info
+    from .config import config
+
 import asyncio
 
 mcp = FastMCP("grok-search")
@@ -34,14 +52,15 @@ async def web_search(query: str, platform: str = "", min_results: int = 3, max_r
     try:
         api_url = config.grok_api_url
         api_key = config.grok_api_key
+        model = config.grok_model
     except ValueError as e:
         error_msg = str(e)
         if ctx:
             await ctx.report_progress(error_msg)
         return f"配置错误: {error_msg}"
-    
-    grok_provider = GrokSearchProvider(api_url, api_key)
-    
+
+    grok_provider = GrokSearchProvider(api_url, api_key, model)
+
     await log_info(ctx, f"Begin Search: {query}", config.debug_enabled)
     results = await grok_provider.search(query, platform, min_results, max_results, ctx)
     await log_info(ctx, "Search Finished!", config.debug_enabled)
@@ -84,13 +103,14 @@ async def web_fetch(url: str, ctx: Context = None) -> str:
     try:
         api_url = config.grok_api_url
         api_key = config.grok_api_key
+        model = config.grok_model
     except ValueError as e:
         error_msg = str(e)
         if ctx:
             await ctx.report_progress(error_msg)
         return f"配置错误: {error_msg}"
     await log_info(ctx, f"Begin Fetch: {url}", config.debug_enabled)
-    grok_provider = GrokSearchProvider(api_url, api_key)
+    grok_provider = GrokSearchProvider(api_url, api_key, model)
     results = await grok_provider.fetch(url, ctx)
     await log_info(ctx, "Fetch Finished!", config.debug_enabled)
     return results
@@ -113,11 +133,16 @@ async def web_fetch(url: str, ctx: Context = None) -> str:
         A JSON-encoded string containing configuration details:
         - `api_url`: The configured Grok API endpoint
         - `api_key`: The API key (masked for security, showing only first and last 4 characters)
+        - `model`: The currently selected model for search and fetch operations
         - `debug_enabled`: Whether debug mode is enabled
         - `log_level`: Current logging level
         - `log_dir`: Directory where logs are stored
         - `config_status`: Overall configuration status (✅ complete or ❌ error)
         - `connection_test`: Result of testing API connectivity to /models endpoint
+          - `status`: Connection status
+          - `message`: Status message with model count
+          - `response_time_ms`: API response time in milliseconds
+          - `available_models`: List of available model IDs (only present on successful connection)
 
     Notes
     -----
@@ -173,6 +198,15 @@ async def get_config_info() -> str:
                     if "data" in models_data and isinstance(models_data["data"], list):
                         model_count = len(models_data["data"])
                         test_result["message"] += f"，共 {model_count} 个模型"
+
+                        # 提取所有模型的 ID/名称
+                        model_names = []
+                        for model in models_data["data"]:
+                            if isinstance(model, dict) and "id" in model:
+                                model_names.append(model["id"])
+
+                        if model_names:
+                            test_result["available_models"] = model_names
                 except:
                     pass
             else:
@@ -196,6 +230,70 @@ async def get_config_info() -> str:
     config_info["connection_test"] = test_result
 
     return json.dumps(config_info, ensure_ascii=False, indent=2)
+
+
+@mcp.tool(
+    name="switch_model",
+    description="""
+    Switches the default Grok model used for search and fetch operations, and persists the setting.
+
+    This tool is useful for:
+    - Changing the AI model used for web search and content fetching
+    - Testing different models for performance or quality comparison
+    - Persisting model preference across sessions
+
+    Parameters
+    ----------
+    model : str
+        The model ID to switch to (e.g., "grok-4-fast", "grok-2-latest", "grok-vision-beta")
+
+    Returns
+    -------
+    str
+        A JSON-encoded string containing:
+        - `status`: Success or error status
+        - `previous_model`: The model that was being used before
+        - `current_model`: The newly selected model
+        - `message`: Status message
+        - `config_file`: Path where the model preference is saved
+
+    Notes
+    -----
+    - The model setting is persisted to ~/.config/grok-search/config.json
+    - This setting will be used for all future search and fetch operations
+    - You can verify available models using the get_config_info tool
+    """
+)
+async def switch_model(model: str) -> str:
+    import json
+
+    try:
+        previous_model = config.grok_model
+        config.set_model(model)
+        current_model = config.grok_model
+
+        result = {
+            "status": "✅ 成功",
+            "previous_model": previous_model,
+            "current_model": current_model,
+            "message": f"模型已从 {previous_model} 切换到 {current_model}",
+            "config_file": str(config.config_file)
+        }
+
+        return json.dumps(result, ensure_ascii=False, indent=2)
+
+    except ValueError as e:
+        result = {
+            "status": "❌ 失败",
+            "message": f"切换模型失败: {str(e)}"
+        }
+        return json.dumps(result, ensure_ascii=False, indent=2)
+    except Exception as e:
+        result = {
+            "status": "❌ 失败",
+            "message": f"未知错误: {str(e)}"
+        }
+        return json.dumps(result, ensure_ascii=False, indent=2)
 
 
 def main():

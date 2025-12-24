@@ -1,4 +1,5 @@
 import os
+import json
 from pathlib import Path
 
 class Config:
@@ -9,11 +10,38 @@ class Config:
         '"git+https://github.com/GuDaStudio/GrokSearch","grok-search"],'
         '"env":{"GROK_API_URL":"your-api-url","GROK_API_KEY":"your-api-key"}}\''
     )
+    _DEFAULT_MODEL = "grok-4-fast"
 
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
+            cls._instance._config_file = None
+            cls._instance._cached_model = None
         return cls._instance
+
+    @property
+    def config_file(self) -> Path:
+        if self._config_file is None:
+            config_dir = Path.home() / ".config" / "grok-search"
+            config_dir.mkdir(parents=True, exist_ok=True)
+            self._config_file = config_dir / "config.json"
+        return self._config_file
+
+    def _load_config_file(self) -> dict:
+        if not self.config_file.exists():
+            return {}
+        try:
+            with open(self.config_file, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError):
+            return {}
+
+    def _save_config_file(self, config_data: dict) -> None:
+        try:
+            with open(self.config_file, 'w', encoding='utf-8') as f:
+                json.dump(config_data, f, ensure_ascii=False, indent=2)
+        except IOError as e:
+            raise ValueError(f"无法保存配置文件: {str(e)}")
 
     @property
     def debug_enabled(self) -> bool:
@@ -52,6 +80,26 @@ class Config:
         user_log_dir.mkdir(parents=True, exist_ok=True)
         return user_log_dir
 
+    @property
+    def grok_model(self) -> str:
+        if self._cached_model is not None:
+            return self._cached_model
+
+        config_data = self._load_config_file()
+        file_model = config_data.get("model")
+        if file_model:
+            self._cached_model = file_model
+            return file_model
+
+        self._cached_model = self._DEFAULT_MODEL
+        return self._DEFAULT_MODEL
+
+    def set_model(self, model: str) -> None:
+        config_data = self._load_config_file()
+        config_data["model"] = model
+        self._save_config_file(config_data)
+        self._cached_model = model
+
     @staticmethod
     def _mask_api_key(key: str) -> str:
         """脱敏显示 API Key，只显示前后各 4 个字符"""
@@ -74,6 +122,7 @@ class Config:
         return {
             "GROK_API_URL": api_url,
             "GROK_API_KEY": api_key_masked,
+            "GROK_MODEL": self.grok_model,
             "GROK_DEBUG": self.debug_enabled,
             "GROK_LOG_LEVEL": self.log_level,
             "GROK_LOG_DIR": str(self.log_dir),
