@@ -46,6 +46,7 @@ Grok Search MCP 是一个基于 [FastMCP](https://github.com/jlowin/fastmcp) 构
 - ✅ 实时网络搜索 + 网页内容抓取
 - ✅ 支持指定搜索平台（Twitter、Reddit、GitHub 等）
 - ✅ 配置测试工具（连接测试 + API Key 脱敏）
+- ✅ 动态模型切换（支持切换不同 Grok 模型并持久化保存）
 - ✅ 可扩展架构，支持添加其他搜索 Provider
 </details>
 
@@ -156,6 +157,7 @@ claude mcp list
 | `web_search` | `query`(必填), `platform`/`min_results`/`max_results`(可选) | `[{title,url,content}]` | 多源聚合/事实核查/最新资讯 |
 | `web_fetch` | `url`(必填) | Structured Markdown | 完整内容获取/深度分析 |
 | `get_config_info` | 无 | `{api_url,status,test}` | 连接诊断 |
+| `switch_model` | `model`(必填) | `{status,previous_model,current_model}` | 切换Grok模型/性能优化 |
 
 ## 执行策略
 **查询构建**：广度用 `web_search`，深度用 `web_fetch`，特定平台设 `platform` 参数
@@ -203,6 +205,7 @@ claude mcp list
   | **web_search** | 实时网络搜索 | `query` (必填)<br>`platform` (可选: Twitter/GitHub/Reddit)<br>`min_results` / `max_results` | JSON Array<br>`{title, url, content}` | • 事实核查<br>• 最新资讯<br>• 技术文档检索 |
   | **web_fetch** | 网页内容抓取 | `url` (必填) | Structured Markdown<br>(含元数据头部) | • 完整文档获取<br>• 深度内容分析<br>• 链接内容验证 |
   | **get_config_info** | 配置状态检测 | 无参数 | JSON<br>`{api_url, status, connection_test}` | • 连接问题诊断<br>• 首次使用验证 |
+  | **switch_model** | 模型切换 | `model` (必填) | JSON<br>`{status, previous_model, current_model, config_file}` | • 切换Grok模型<br>• 性能/质量优化<br>• 跨会话持久化 |
 
   ## 2. Search Workflow
 
@@ -257,7 +260,7 @@ claude mcp list
 
 #### MCP 工具说明
 
-本项目提供三个 MCP 工具：
+本项目提供四个 MCP 工具：
 
 ##### `web_search` - 网络搜索
 
@@ -346,6 +349,45 @@ Model Context Protocol (MCP) 是一个标准化的通信协议，用于连接 AI
     "response_time_ms": 234.56
   }
 }
+```
+
+</details>
+
+##### `switch_model` - 模型切换
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `model` | string | ✅ | 要切换到的模型 ID（如 `"grok-4-fast"`, `"grok-2-latest"`, `"grok-vision-beta"`） |
+
+**功能**：
+- 切换用于搜索和抓取操作的默认 Grok 模型
+- 配置自动持久化到 `~/.config/grok-search/config.json`
+- 支持跨会话保持设置
+- 适用于性能优化或质量对比测试
+
+<details>
+<summary><b>返回示例</b>（点击展开）</summary>
+
+```json
+{
+  "status": "✅ 成功",
+  "previous_model": "grok-4-fast",
+  "current_model": "grok-2-latest",
+  "message": "模型已从 grok-4-fast 切换到 grok-2-latest",
+  "config_file": "/home/user/.config/grok-search/config.json"
+}
+```
+
+**使用示例**：
+
+在 Claude 对话中输入：
+```
+请将 Grok 模型切换到 grok-2-latest
+```
+
+或直接说：
+```
+切换模型到 grok-vision-beta
 ```
 
 </details>

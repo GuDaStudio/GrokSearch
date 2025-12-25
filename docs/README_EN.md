@@ -46,6 +46,7 @@ Comparison with other search solutions:
 - ✅ Real-time web search + webpage content fetching
 - ✅ Support for platform-specific searches (Twitter, Reddit, GitHub, etc.)
 - ✅ Configuration testing tool (connection test + API Key masking)
+- ✅ Dynamic model switching (switch between Grok models with persistent settings)
 - ✅ Extensible architecture for additional search providers
 
 ## Quick Start
@@ -199,6 +200,7 @@ To better utilize Grok Search, you can optimize the overall Vibe Coding CLI by c
 | **web_search** | Real-time web search | `query` (required)<br>`platform` (optional: Twitter/GitHub/Reddit)<br>`min_results` / `max_results` | JSON Array<br>`{title, url, content}` | • Fact-checking<br>• Latest news<br>• Technical docs retrieval |
 | **web_fetch** | Webpage content fetching | `url` (required) | Structured Markdown<br>(with metadata header) | • Complete document retrieval<br>• In-depth content analysis<br>• Link content verification |
 | **get_config_info** | Configuration status detection | No parameters | JSON<br>`{api_url, status, connection_test}` | • Connection troubleshooting<br>• First-time use validation |
+| **switch_model** | Model switching | `model` (required) | JSON<br>`{status, previous_model, current_model, config_file}` | • Switch Grok models<br>• Performance/quality optimization<br>• Cross-session persistence |
 
 ## 2. Search Workflow
 
@@ -252,7 +254,7 @@ Module Description:
 
 #### MCP Tools
 
-This project provides three MCP tools:
+This project provides four MCP tools:
 
 ##### `web_search` - Web Search
 
@@ -378,6 +380,45 @@ For more information, visit [Official Documentation](https://modelcontextprotoco
     "response_time_ms": 234.56
   }
 }
+```
+
+</details>
+
+##### `switch_model` - Model Switching
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `model` | string | ✅ | Model ID to switch to (e.g., `"grok-4-fast"`, `"grok-2-latest"`, `"grok-vision-beta"`) |
+
+**Features**:
+- Switch the default Grok model used for search and fetch operations
+- Configuration automatically persisted to `~/.config/grok-search/config.json`
+- Cross-session settings retention
+- Suitable for performance optimization or quality comparison testing
+
+<details>
+<summary><b>Return Example</b> (Click to expand)</summary>
+
+```json
+{
+  "status": "✅ 成功",
+  "previous_model": "grok-4-fast",
+  "current_model": "grok-2-latest",
+  "message": "模型已从 grok-4-fast 切换到 grok-2-latest",
+  "config_file": "/home/user/.config/grok-search/config.json"
+}
+```
+
+**Usage Example**:
+
+In Claude conversation, type:
+```
+Please switch the Grok model to grok-2-latest
+```
+
+Or simply say:
+```
+Switch model to grok-vision-beta
 ```
 
 </details>
