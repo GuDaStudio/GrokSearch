@@ -48,6 +48,7 @@ Grok Search MCP 是一个基于 [FastMCP](https://github.com/jlowin/fastmcp) 构
 - ✅ 配置测试工具（连接测试 + API Key 脱敏）
 - ✅ 动态模型切换（支持切换不同 Grok 模型并持久化保存）
 - ✅ **工具路由控制（一键禁用官方 WebSearch/WebFetch，强制使用 GrokSearch）**
+- ✅ **自动时间注入（搜索时自动获取本地时间，确保时间相关查询的准确性）**
 - ✅ 可扩展架构，支持添加其他搜索 Provider
 </details>
 
@@ -266,7 +267,7 @@ claude mcp list
 
 #### MCP 工具说明
 
-本项目提供五个 MCP 工具：
+本项目提供六个 MCP 工具：
 
 ##### `web_search` - 网络搜索
 
@@ -354,6 +355,35 @@ Model Context Protocol (MCP) 是一个标准化的通信协议，用于连接 AI
     "message": "成功获取模型列表 (HTTP 200)，共 x 个模型",
     "response_time_ms": 234.56
   }
+}
+```
+
+</details>
+
+##### `get_current_time` - 获取当前时间
+
+**无需参数**。返回系统本地时间信息，确保时间相关查询的准确性。
+
+**功能**：
+- 获取准确的本地日期和时间
+- 自动检测系统时区
+- 支持中英文星期显示
+- 提供多种时间格式（ISO 8601、Unix 时间戳等）
+
+**注意**：`web_search` 工具会**自动注入当前时间信息**到搜索查询中，因此大多数情况下无需手动调用此工具。
+
+<details>
+<summary><b>返回示例</b>（点击展开）</summary>
+
+```json
+{
+  "date": "2024-01-15",
+  "time": "14:30:25",
+  "weekday": "星期一",
+  "weekday_en": "Monday",
+  "timezone": "CST",
+  "iso_format": "2024-01-15T14:30:25+08:00",
+  "unix_timestamp": 1705300225
 }
 ```
 

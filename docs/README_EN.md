@@ -48,6 +48,7 @@ Comparison with other search solutions:
 - ✅ Configuration testing tool (connection test + API Key masking)
 - ✅ Dynamic model switching (switch between Grok models with persistent settings)
 - ✅ **Tool routing control (one-click disable built-in WebSearch/WebFetch, force use GrokSearch)**
+- ✅ **Automatic time injection (automatically gets local time during search for accurate time-sensitive queries)**
 - ✅ Extensible architecture for additional search providers
 
 ## Quick Start
@@ -256,7 +257,7 @@ Module Description:
 
 #### MCP Tools
 
-This project provides four MCP tools:
+This project provides six MCP tools:
 
 ##### `web_search` - Web Search
 
@@ -381,6 +382,37 @@ For more information, visit [Official Documentation](https://modelcontextprotoco
     "message": "Successfully retrieved model list (HTTP 200), 5 models available",
     "response_time_ms": 234.56
   }
+}
+```
+
+</details>
+
+##### `get_current_time` - Get Current Time
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| None | - | - | This tool requires no parameters |
+
+**Features**:
+- Get accurate local date and time
+- Auto-detect system timezone
+- Support Chinese and English weekday display
+- Provide multiple time formats (ISO 8601, Unix timestamp, etc.)
+
+**Note**: The `web_search` tool **automatically injects current time information** into search queries, so in most cases you don't need to call this tool manually.
+
+<details>
+<summary><b>Return Example</b> (Click to expand)</summary>
+
+```json
+{
+  "date": "2024-01-15",
+  "time": "14:30:25",
+  "weekday": "星期一",
+  "weekday_en": "Monday",
+  "timezone": "CST",
+  "iso_format": "2024-01-15T14:30:25+08:00",
+  "unix_timestamp": 1705300225
 }
 ```
 
