@@ -5,10 +5,33 @@ from email.utils import parsedate_to_datetime
 from typing import List, Optional
 from tenacity import AsyncRetrying, retry_if_exception, stop_after_attempt, wait_random_exponential
 from tenacity.wait import wait_base
+from zoneinfo import ZoneInfo
 from .base import BaseSearchProvider, SearchResult
 from ..utils import search_prompt, fetch_prompt
 from ..logger import log_info
 from ..config import config
+
+
+def get_local_time_info() -> str:
+    """获取本地时间信息，用于注入到搜索查询中"""
+    try:
+        # 尝试获取系统本地时区
+        local_tz = datetime.now().astimezone().tzinfo
+        local_now = datetime.now(local_tz)
+    except Exception:
+        # 降级使用 UTC
+        local_now = datetime.now(timezone.utc)
+
+    # 格式化时间信息
+    weekdays_cn = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
+    weekday = weekdays_cn[local_now.weekday()]
+
+    return (
+        f"[Current Time Context]\n"
+        f"- Date: {local_now.strftime('%Y-%m-%d')} ({weekday})\n"
+        f"- Time: {local_now.strftime('%H:%M:%S')}\n"
+        f"- Timezone: {local_now.tzname() or 'Local'}\n"
+    )
 
 RETRYABLE_STATUS_CODES = {408, 429, 500, 502, 503, 504}
 
@@ -79,6 +102,9 @@ class GrokSearchProvider(BaseSearchProvider):
         if max_results:
             return_prompt = "\n\nYou should return the results in a JSON format, and the results should at least be " + str(min_results) + " and at most be " + str(max_results) + " results."
 
+        # 自动注入当前时间信息，帮助模型理解时间相关查询
+        time_context = get_local_time_info()
+
         payload = {
             "model": self.model,
             "messages": [
@@ -86,7 +112,7 @@ class GrokSearchProvider(BaseSearchProvider):
                     "role": "system",
                     "content": search_prompt,
                 },
-                {"role": "user", "content": query + platform_prompt + return_prompt },
+                {"role": "user", "content": time_context + "\n" + query + platform_prompt + return_prompt },
             ],
             "stream": True,
         }
