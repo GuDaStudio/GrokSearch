@@ -124,11 +124,14 @@ class GrokSearchProvider(BaseSearchProvider):
             
             full_body_buffer.append(line)
 
-            if line.startswith("data: "):
-                if line == "data: [DONE]":
+            # 兼容 "data: {...}" 和 "data:{...}" 两种 SSE 格式
+            if line.startswith("data:"):
+                if line in ("data: [DONE]", "data:[DONE]"):
                     continue
                 try:
-                    data = json.loads(line[6:])
+                    # 去掉 "data:" 前缀，并去除可能的空格
+                    json_str = line[5:].lstrip()
+                    data = json.loads(json_str)
                     choices = data.get("choices", [])
                     if choices and len(choices) > 0:
                         delta = choices[0].get("delta", {})
