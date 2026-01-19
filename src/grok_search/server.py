@@ -10,13 +10,13 @@ from fastmcp import FastMCP, Context
 
 # 尝试使用绝对导入（支持 mcp run）
 try:
-    from grok_search.providers.grok import GrokSearchProvider, get_local_time_info
+    from grok_search.providers.grok import GrokSearchProvider
     from grok_search.utils import format_search_results
     from grok_search.logger import log_info
     from grok_search.config import config
 except ImportError:
     # 降级到相对导入（pip install -e . 后）
-    from .providers.grok import GrokSearchProvider, get_local_time_info
+    from .providers.grok import GrokSearchProvider
     from .utils import format_search_results
     from .logger import log_info
     from .config import config
@@ -230,62 +230,6 @@ async def get_config_info() -> str:
     config_info["connection_test"] = test_result
 
     return json.dumps(config_info, ensure_ascii=False, indent=2)
-
-
-@mcp.tool(
-    name="get_current_time",
-    description="""
-    Returns the current local time from the system.
-
-    This tool is useful for:
-    - Getting accurate current date and time for time-sensitive queries
-    - Understanding the user's local timezone
-    - Providing time context for search queries that involve "today", "this week", "recent", etc.
-
-    Returns
-    -------
-    str
-        A JSON-encoded string containing:
-        - `date`: Current date in YYYY-MM-DD format
-        - `time`: Current time in HH:MM:SS format
-        - `weekday`: Day of the week in Chinese
-        - `weekday_en`: Day of the week in English
-        - `timezone`: Local timezone name
-        - `iso_format`: Full ISO 8601 timestamp
-        - `unix_timestamp`: Unix timestamp (seconds since epoch)
-
-    Notes
-    -----
-    - Time is obtained from the local system, not from the AI model
-    - This ensures accurate time information regardless of model's knowledge cutoff
-    - Useful for queries involving relative time expressions
-    """
-)
-async def get_current_time() -> str:
-    import json
-    from datetime import datetime, timezone
-
-    try:
-        # 获取本地时区
-        local_tz = datetime.now().astimezone().tzinfo
-        local_now = datetime.now(local_tz)
-    except Exception:
-        local_now = datetime.now(timezone.utc)
-
-    weekdays_cn = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
-    weekdays_en = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-
-    time_info = {
-        "date": local_now.strftime("%Y-%m-%d"),
-        "time": local_now.strftime("%H:%M:%S"),
-        "weekday": weekdays_cn[local_now.weekday()],
-        "weekday_en": weekdays_en[local_now.weekday()],
-        "timezone": local_now.tzname() or "Local",
-        "iso_format": local_now.isoformat(),
-        "unix_timestamp": int(local_now.timestamp())
-    }
-
-    return json.dumps(time_info, ensure_ascii=False, indent=2)
 
 
 @mcp.tool(
