@@ -1,15 +1,16 @@
-import httpx
 import json
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import List, Optional
-from tenacity import AsyncRetrying, retry_if_exception, stop_after_attempt, wait_random_exponential
+
+import httpx
+from tenacity import retry_if_exception, retry_if_result, stop_after_attempt, wait_random_exponential
 from tenacity.wait import wait_base
-from zoneinfo import ZoneInfo
+
 from .base import BaseSearchProvider, SearchResult
-from ..utils import search_prompt, fetch_prompt
-from ..logger import log_info
 from ..config import config
+from ..logger import log_info
+from ..utils import search_prompt, fetch_prompt
 
 
 def get_local_time_info() -> str:
@@ -77,6 +78,26 @@ def _is_retryable_exception(exc) -> bool:
     if isinstance(exc, httpx.HTTPStatusError):
         return exc.response.status_code in RETRYABLE_STATUS_CODES
     return False
+
+
+def _is_empty_result(content: str) -> bool:
+    """检查结果是否为空，需要重试
+
+    只有当 HTTP 请求成功（200）但返回内容为空时才重试。
+    4xx/5xx 错误由现有的 _is_retryable_exception 处理。
+
+    Args:
+        content: _parse_streaming_response 返回的内容字符串
+
+    Returns:
+        bool: True 表示内容为空需要重试，False 表示有内容不需要重试
+    """
+    if not isinstance(content, str):
+        return False
+
+    # 去除空白字符后检查是否为空
+    cleaned_content = content.strip()
+    return len(cleaned_content) == 0
 
 
 class _WaitWithRetryAfter(wait_base):
@@ -222,21 +243,43 @@ class GrokSearchProvider(BaseSearchProvider):
 
     async def _execute_stream_with_retry(self, headers: dict, payload: dict, ctx=None) -> str:
         """执行带重试机制的流式 HTTP 请求"""
+        from tenacity import retry, RetryError
+
         timeout = httpx.Timeout(connect=6.0, read=120.0, write=10.0, pool=None)
 
-        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-            async for attempt in AsyncRetrying(
-                stop=stop_after_attempt(config.retry_max_attempts + 1),
-                wait=_WaitWithRetryAfter(config.retry_multiplier, config.retry_max_wait),
-                retry=retry_if_exception(_is_retryable_exception),
-                reraise=True,
-            ):
-                with attempt:
-                    async with client.stream(
-                        "POST",
-                        f"{self.api_url}/chat/completions",
-                        headers=headers,
-                        json=payload,
-                    ) as response:
-                        response.raise_for_status()
-                        return await self._parse_streaming_response(response, ctx)
+        # 构建重试条件：网络错误 + 空结果（可选）
+        retry_conditions = retry_if_exception(_is_retryable_exception)
+        if config.retry_empty_results_enabled:
+            retry_conditions = retry_conditions | retry_if_result(_is_empty_result)
+
+        # 创建一个内部函数，使用装饰器模式
+        @retry(
+            stop=stop_after_attempt(config.retry_max_attempts + 1),
+            wait=_WaitWithRetryAfter(config.retry_multiplier, config.retry_max_wait),
+            retry=retry_conditions,
+            reraise=True,
+        )
+        async def _do_request():
+            """执行实际的 HTTP 请求"""
+            async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+                async with client.stream(
+                    "POST",
+                    f"{self.api_url}/chat/completions",
+                    headers=headers,
+                    json=payload,
+                ) as response:
+                    response.raise_for_status()
+                    return await self._parse_streaming_response(response, ctx)
+
+        # 调用装饰后的函数
+        try:
+            return await _do_request()
+        except RetryError as e:
+            # 重试耗尽，返回最后一次的结果
+            # 如果最后一次是因为空结果失败，返回空字符串
+            if e.last_attempt.failed:
+                # 如果是异常导致的失败，重新抛出
+                if e.last_attempt.exception():
+                    raise
+            # 返回最后一次的结果
+            return e.last_attempt.result()

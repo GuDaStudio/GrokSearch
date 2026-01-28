@@ -60,6 +60,11 @@ class Config:
         return int(os.getenv("GROK_RETRY_MAX_WAIT", "10"))
 
     @property
+    def retry_empty_results_enabled(self) -> bool:
+        """是否启用空结果重试"""
+        return os.getenv("GROK_RETRY_EMPTY_RESULTS", "true").lower() in ("true", "1", "yes")
+
+    @property
     def grok_api_url(self) -> str:
         url = os.getenv("GROK_API_URL")
         if not url:
@@ -136,6 +141,7 @@ class Config:
             "GROK_API_KEY": api_key_masked,
             "GROK_MODEL": self.grok_model,
             "GROK_DEBUG": self.debug_enabled,
+            "GROK_RETRY_EMPTY_RESULTS": self.retry_empty_results_enabled,
             "GROK_LOG_LEVEL": self.log_level,
             "GROK_LOG_DIR": str(self.log_dir),
             "config_status": config_status
