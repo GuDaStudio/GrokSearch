@@ -12,11 +12,23 @@ class Config:
     )
     _DEFAULT_MODEL = "grok-4-fast"
 
+    # 字段名映射: 外部名 -> (config.json键, 环境变量名, 默认值, 类型)
+    _FIELD_MAP = {
+        "GROK_API_URL": ("api_url", "GROK_API_URL", None, str),
+        "GROK_API_KEY": ("api_key", "GROK_API_KEY", None, str),
+        "GROK_MODEL": ("model", None, "grok-4-fast", str),
+        "GROK_DEBUG": ("debug", "GROK_DEBUG", False, bool),
+        "GROK_LOG_LEVEL": ("log_level", "GROK_LOG_LEVEL", "INFO", str),
+        "GROK_LOG_DIR": ("log_dir", "GROK_LOG_DIR", "logs", str),
+        "TAVILY_ENABLED": ("tavily_enabled", "TAVILY_ENABLED", False, bool),
+        "TAVILY_API_KEY": ("tavily_api_key", "TAVILY_API_KEY", None, str),
+    }
+
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._config_file = None
-            cls._instance._cached_model = None
+            cls._instance._cache = {}
         return cls._instance
 
     @property
@@ -43,9 +55,52 @@ class Config:
         except IOError as e:
             raise ValueError(f"无法保存配置文件: {str(e)}")
 
-    @property
-    def debug_enabled(self) -> bool:
-        return os.getenv("GROK_DEBUG", "false").lower() in ("true", "1", "yes")
+    def _get_value(self, field: str):
+        """通用配置读取: config.json > 环境变量 > 默认值"""
+        if field not in self._FIELD_MAP:
+            raise ValueError(f"未知配置字段: {field}")
+
+        json_key, env_var, default, val_type = self._FIELD_MAP[field]
+
+        # 优先从缓存读取
+        if json_key in self._cache:
+            return self._cache[json_key]
+
+        # 从 config.json 读取
+        config_data = self._load_config_file()
+        if json_key in config_data:
+            value = config_data[json_key]
+            self._cache[json_key] = value
+            return value
+
+        # 从环境变量读取
+        if env_var:
+            env_value = os.getenv(env_var)
+            if env_value is not None:
+                if val_type == bool:
+                    return env_value.lower() in ("true", "1", "yes")
+                return env_value
+
+        return default
+
+    def set_config(self, field: str, value) -> dict:
+        """通用配置写入"""
+        if field not in self._FIELD_MAP:
+            raise ValueError(f"未知配置字段: {field}")
+
+        json_key, _, _, val_type = self._FIELD_MAP[field]
+        old_value = self._get_value(field)
+
+        # 类型转换
+        if val_type == bool and isinstance(value, str):
+            value = value.lower() in ("true", "1", "yes")
+
+        config_data = self._load_config_file()
+        config_data[json_key] = value
+        self._save_config_file(config_data)
+        self._cache[json_key] = value
+
+        return {"field": field, "old_value": old_value, "new_value": value}
 
     @property
     def retry_max_attempts(self) -> int:
@@ -60,8 +115,12 @@ class Config:
         return int(os.getenv("GROK_RETRY_MAX_WAIT", "10"))
 
     @property
+    def debug_enabled(self) -> bool:
+        return self._get_value("GROK_DEBUG")
+
+    @property
     def grok_api_url(self) -> str:
-        url = os.getenv("GROK_API_URL")
+        url = self._get_value("GROK_API_URL")
         if not url:
             raise ValueError(
                 f"Grok API URL 未配置！\n"
@@ -71,7 +130,7 @@ class Config:
 
     @property
     def grok_api_key(self) -> str:
-        key = os.getenv("GROK_API_KEY")
+        key = self._get_value("GROK_API_KEY")
         if not key:
             raise ValueError(
                 f"Grok API Key 未配置！\n"
@@ -81,19 +140,20 @@ class Config:
 
     @property
     def tavily_enabled(self) -> bool:
-        return os.getenv("TAVILY_ENABLED", "false").lower() in ("true", "1", "yes")
+        return self._get_value("TAVILY_ENABLED")
 
     @property
     def tavily_api_key(self) -> str | None:
-        return os.getenv("TAVILY_API_KEY")
+        return self._get_value("TAVILY_API_KEY")
 
     @property
     def log_level(self) -> str:
-        return os.getenv("GROK_LOG_LEVEL", "INFO").upper()
+        level = self._get_value("GROK_LOG_LEVEL")
+        return level.upper() if level else "INFO"
 
     @property
     def log_dir(self) -> Path:
-        log_dir_str = os.getenv("GROK_LOG_DIR", "logs")
+        log_dir_str = self._get_value("GROK_LOG_DIR") or "logs"
         if Path(log_dir_str).is_absolute():
             return Path(log_dir_str)
         user_log_dir = Path.home() / ".config" / "grok-search" / log_dir_str
@@ -102,23 +162,7 @@ class Config:
 
     @property
     def grok_model(self) -> str:
-        if self._cached_model is not None:
-            return self._cached_model
-
-        config_data = self._load_config_file()
-        file_model = config_data.get("model")
-        if file_model:
-            self._cached_model = file_model
-            return file_model
-
-        self._cached_model = self._DEFAULT_MODEL
-        return self._DEFAULT_MODEL
-
-    def set_model(self, model: str) -> None:
-        config_data = self._load_config_file()
-        config_data["model"] = model
-        self._save_config_file(config_data)
-        self._cached_model = model
+        return self._get_value("GROK_MODEL")
 
     @staticmethod
     def _mask_api_key(key: str) -> str:

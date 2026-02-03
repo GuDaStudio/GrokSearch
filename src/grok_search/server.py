@@ -233,67 +233,50 @@ async def get_config_info() -> str:
 
 
 @mcp.tool(
-    name="switch_model",
+    name="update_config",
     description="""
-    Switches the default Grok model used for search and fetch operations, and persists the setting.
+    Updates a Grok Search configuration field and persists it to config file.
 
-    This tool is useful for:
-    - Changing the AI model used for web search and content fetching
-    - Testing different models for performance or quality comparison
-    - Persisting model preference across sessions
+    Supported fields:
+    - GROK_API_URL: API endpoint URL
+    - GROK_API_KEY: API authentication key
+    - GROK_MODEL: Model ID (e.g., "grok-4-fast", "grok-2-latest")
+    - GROK_DEBUG: Enable debug mode (true/false)
+    - GROK_LOG_LEVEL: Logging level (DEBUG/INFO/WARNING/ERROR)
+    - GROK_LOG_DIR: Log directory path
+    - TAVILY_ENABLED: Enable Tavily integration (true/false)
+    - TAVILY_API_KEY: Tavily API key
 
     Parameters
     ----------
-    model : str
-        The model ID to switch to (e.g., "grok-4-fast", "grok-2-latest", "grok-vision-beta")
+    field : str
+        Configuration field name (case-sensitive, e.g., "GROK_MODEL")
+    value : str
+        New value for the field
 
     Returns
     -------
     str
-        A JSON-encoded string containing:
-        - `status`: Success or error status
-        - `previous_model`: The model that was being used before
-        - `current_model`: The newly selected model
-        - `message`: Status message
-        - `config_file`: Path where the model preference is saved
-
-    Notes
-    -----
-    - The model setting is persisted to ~/.config/grok-search/config.json
-    - This setting will be used for all future search and fetch operations
-    - You can verify available models using the get_config_info tool
+        JSON with status, old_value, new_value, and config_file path
     """
 )
-async def switch_model(model: str) -> str:
+async def update_config(field: str, value: str) -> str:
     import json
 
     try:
-        previous_model = config.grok_model
-        config.set_model(model)
-        current_model = config.grok_model
-
-        result = {
+        result = config.set_config(field, value)
+        return json.dumps({
             "status": "✅ 成功",
-            "previous_model": previous_model,
-            "current_model": current_model,
-            "message": f"模型已从 {previous_model} 切换到 {current_model}",
+            "field": result["field"],
+            "old_value": result["old_value"],
+            "new_value": result["new_value"],
             "config_file": str(config.config_file)
-        }
-
-        return json.dumps(result, ensure_ascii=False, indent=2)
-
+        }, ensure_ascii=False, indent=2)
     except ValueError as e:
-        result = {
+        return json.dumps({
             "status": "❌ 失败",
-            "message": f"切换模型失败: {str(e)}"
-        }
-        return json.dumps(result, ensure_ascii=False, indent=2)
-    except Exception as e:
-        result = {
-            "status": "❌ 失败",
-            "message": f"未知错误: {str(e)}"
-        }
-        return json.dumps(result, ensure_ascii=False, indent=2)
+            "message": str(e)
+        }, ensure_ascii=False, indent=2)
 
 
 @mcp.tool(
