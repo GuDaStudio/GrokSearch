@@ -46,7 +46,7 @@ Grok Search MCP 是一个基于 [FastMCP](https://github.com/jlowin/fastmcp) 构
 - ✅ 实时网络搜索 + 网页内容抓取
 - ✅ 支持指定搜索平台（Twitter、Reddit、GitHub 等）
 - ✅ 配置测试工具（连接测试 + API Key 脱敏）
-- ✅ 动态模型切换（支持切换不同 Grok 模型并持久化保存）
+- ✅ **多 Provider 支持（Grok / Tavily），通过 `update_config` 动态切换**
 - ✅ **工具路由控制（一键禁用官方 WebSearch/WebFetch，强制使用 GrokSearch）**
 - ✅ **自动时间注入（搜索时自动获取本地时间，确保时间相关查询的准确性）**
 - ✅ 可扩展架构，支持添加其他搜索 Provider
@@ -89,10 +89,10 @@ wget -qO- https://astral.sh/uv/install.sh | sh
 </details>
 
 
-### Step 1. 安装 Grok Search MCP 
+### Step 1. 安装 Grok Search MCP
 
 使用 `claude mcp add-json` 一键安装并配置：
-**注意：**  需要替换 **GROK_API_URL** 以及 **GROK_API_KEY**这两个字段为你自己的站点以及密钥，目前只支持openai格式，所以如果需要使用grok，也需要使用转为openai格式的grok镜像站
+**注意：** 需要替换 **GROK_API_URL** 以及 **GROK_API_KEY** 这两个字段为你自己的站点以及密钥。支持 Grok 和 Tavily 两种 Provider，通过 `update_config` 工具切换。
 
 ```bash
 claude mcp add-json grok-search --scope user '{
@@ -162,7 +162,7 @@ claude mcp list
 | `web_search` | `query`(必填), `platform`/`min_results`/`max_results`(可选) | `[{title,url,content}]` | 多源聚合/事实核查/最新资讯 |
 | `web_fetch` | `url`(必填) | Structured Markdown | 完整内容获取/深度分析 |
 | `get_config_info` | 无 | `{api_url,status,test}` | 连接诊断 |
-| `switch_model` | `model`(必填) | `{status,previous_model,current_model}` | 切换Grok模型/性能优化 |
+| `update_config` | `field`(必填), `value`(必填) | `{status,old_value,new_value}` | 修改配置/切换Provider |
 | `toggle_builtin_tools` | `action`(可选: on/off/status) | `{blocked,deny_list,file}` | 禁用/启用官方工具 |
 
 ## 执行策略
@@ -211,7 +211,7 @@ claude mcp list
 | `web_search` | `query`(必填), `platform`/`min_results`/`max_results`(可选) | `[{title,url,content}]` | 多源聚合/事实核查/最新资讯 |
 | `web_fetch` | `url`(必填) | Structured Markdown | 完整内容获取/深度分析 |
 | `get_config_info` | 无 | `{api_url,status,test}` | 连接诊断 |
-| `switch_model` | `model`(必填) | `{status,previous_model,current_model}` | 切换Grok模型/性能优化 |
+| `update_config` | `field`(必填), `value`(必填) | `{status,old_value,new_value}` | 修改配置/切换Provider |
 | `toggle_builtin_tools` | `action`(可选: on/off/status) | `{blocked,deny_list,file}` | 禁用/启用官方工具 |
 
 
@@ -347,8 +347,13 @@ Model Context Protocol (MCP) 是一个标准化的通信协议，用于连接 AI
 
 ```json
 {
-  "api_url": "https://YOUR-API-URL/grok/v1",
-  "api_key": "sk-a*****************xyz",
+  "PROVIDER": "grok",
+  "API_URL": "https://YOUR-API-URL/grok/v1",
+  "API_KEY": "sk-a*****************xyz",
+  "MODEL": "grok-4-fast",
+  "DEBUG": false,
+  "LOG_LEVEL": "INFO",
+  "LOG_DIR": "/home/user/.config/grok-search/logs",
   "config_status": "✅ 配置完整",
   "connection_test": {
     "status": "✅ 连接成功",
@@ -360,17 +365,26 @@ Model Context Protocol (MCP) 是一个标准化的通信协议，用于连接 AI
 
 </details>
 
-##### `switch_model` - 模型切换
+##### `update_config` - 配置修改
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `model` | string | ✅ | 要切换到的模型 ID（如 `"grok-4-fast"`, `"grok-2-latest"`, `"grok-vision-beta"`） |
+| `field` | string | ✅ | 配置字段名（如 `"PROVIDER"`, `"MODEL"`, `"API_KEY"`） |
+| `value` | string | ✅ | 新的配置值 |
+
+**支持的字段**：
+- `PROVIDER`: 搜索提供者（`"grok"` 或 `"tavily"`）
+- `API_URL`: API 端点 URL（Grok 专用）
+- `API_KEY`: API 认证密钥
+- `MODEL`: 模型 ID（如 `"grok-4-fast"`, `"grok-2-latest"`）
+- `DEBUG`: 调试模式（`"true"` / `"false"`）
+- `LOG_LEVEL`: 日志级别（`"DEBUG"` / `"INFO"` / `"WARNING"` / `"ERROR"`）
+- `LOG_DIR`: 日志目录路径
 
 **功能**：
-- 切换用于搜索和抓取操作的默认 Grok 模型
-- 配置自动持久化到 `~/.config/grok-search/config.json`
+- 修改配置并自动持久化到 `~/.config/grok-search/config.json`
+- 支持切换 Provider（Grok / Tavily）
 - 支持跨会话保持设置
-- 适用于性能优化或质量对比测试
 
 <details>
 <summary><b>返回示例</b>（点击展开）</summary>
@@ -378,9 +392,9 @@ Model Context Protocol (MCP) 是一个标准化的通信协议，用于连接 AI
 ```json
 {
   "status": "✅ 成功",
-  "previous_model": "grok-4-fast",
-  "current_model": "grok-2-latest",
-  "message": "模型已从 grok-4-fast 切换到 grok-2-latest",
+  "field": "PROVIDER",
+  "old_value": "grok",
+  "new_value": "tavily",
   "config_file": "/home/user/.config/grok-search/config.json"
 }
 ```
@@ -389,12 +403,12 @@ Model Context Protocol (MCP) 是一个标准化的通信协议，用于连接 AI
 
 在 Claude 对话中输入：
 ```
-请将 Grok 模型切换到 grok-2-latest
+切换到 Tavily 搜索
 ```
 
 或直接说：
 ```
-切换模型到 grok-vision-beta
+将模型改为 grok-2-latest
 ```
 
 </details>
@@ -446,13 +460,14 @@ Model Context Protocol (MCP) 是一个标准化的通信协议，用于连接 AI
 
 ```
 src/grok_search/
-├── config.py          # 配置管理（环境变量）
+├── config.py          # 配置管理（环境变量 + 持久化）
 ├── server.py          # MCP 服务入口（注册工具）
 ├── logger.py          # 日志系统
 ├── utils.py           # 格式化工具
 └── providers/
     ├── base.py        # SearchProvider 基类
-    └── grok.py        # Grok API 实现
+    ├── grok.py        # Grok API 实现
+    └── tavily.py      # Tavily API 实现
 ```
 
 </details>

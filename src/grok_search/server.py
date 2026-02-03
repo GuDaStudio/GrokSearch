@@ -11,12 +11,14 @@ from fastmcp import FastMCP, Context
 # 尝试使用绝对导入（支持 mcp run）
 try:
     from grok_search.providers.grok import GrokSearchProvider
+    from grok_search.providers.tavily import TavilyProvider
     from grok_search.utils import format_search_results
     from grok_search.logger import log_info
     from grok_search.config import config
 except ImportError:
     # 降级到相对导入（pip install -e . 后）
     from .providers.grok import GrokSearchProvider
+    from .providers.tavily import TavilyProvider
     from .utils import format_search_results
     from .logger import log_info
     from .config import config
@@ -49,21 +51,29 @@ mcp = FastMCP("grok-search")
     """
 )
 async def web_search(query: str, platform: str = "", min_results: int = 3, max_results: int = 10, ctx: Context = None) -> str:
+    provider_name = config.provider
+
     try:
-        api_url = config.grok_api_url
-        api_key = config.grok_api_key
-        model = config.grok_model
+        api_key = config.api_key
     except ValueError as e:
-        error_msg = str(e)
         if ctx:
-            await ctx.report_progress(error_msg)
-        return f"配置错误: {error_msg}"
+            await ctx.report_progress(str(e))
+        return f"配置错误: {str(e)}"
 
-    grok_provider = GrokSearchProvider(api_url, api_key, model)
+    if provider_name == "tavily":
+        provider = TavilyProvider(api_key)
+    else:
+        try:
+            provider = GrokSearchProvider(config.api_url, api_key, config.model)
+        except ValueError as e:
+            if ctx:
+                await ctx.report_progress(str(e))
+            return f"配置错误: {str(e)}"
 
-    await log_info(ctx, f"Begin Search: {query}", config.debug_enabled)
-    results = await grok_provider.search(query, platform, min_results, max_results, ctx)
-    await log_info(ctx, "Search Finished!", config.debug_enabled)
+    await log_info(ctx, f"[{provider_name}] Begin Search: {query}", config.debug_enabled)
+    results = await provider.search(query, platform, min_results, max_results, ctx)
+    await log_info(ctx, f"[{provider_name}] Search Finished!", config.debug_enabled)
+    await ctx.info(results)
     return results
 
 
@@ -100,19 +110,29 @@ async def web_search(query: str, platform: str = "", min_results: int = 3, max_r
     """
 )
 async def web_fetch(url: str, ctx: Context = None) -> str:
+    provider_name = config.provider
+
     try:
-        api_url = config.grok_api_url
-        api_key = config.grok_api_key
-        model = config.grok_model
+        api_key = config.api_key
     except ValueError as e:
-        error_msg = str(e)
         if ctx:
-            await ctx.report_progress(error_msg)
-        return f"配置错误: {error_msg}"
-    await log_info(ctx, f"Begin Fetch: {url}", config.debug_enabled)
-    grok_provider = GrokSearchProvider(api_url, api_key, model)
-    results = await grok_provider.fetch(url, ctx)
-    await log_info(ctx, "Fetch Finished!", config.debug_enabled)
+            await ctx.report_progress(str(e))
+        return f"配置错误: {str(e)}"
+
+    if provider_name == "tavily":
+        provider = TavilyProvider(api_key)
+    else:
+        try:
+            provider = GrokSearchProvider(config.api_url, api_key, config.model)
+        except ValueError as e:
+            if ctx:
+                await ctx.report_progress(str(e))
+            return f"配置错误: {str(e)}"
+
+    await log_info(ctx, f"[{provider_name}] Begin Fetch: {url}", config.debug_enabled)
+    results = await provider.fetch(url, ctx)
+    await log_info(ctx, f"[{provider_name}] Fetch Finished!", config.debug_enabled)
+    await log_info(ctx, f"[{provider_name}] Fetch Results: {results}", config.debug_enabled)
     return results
 
 
@@ -166,8 +186,8 @@ async def get_config_info() -> str:
     }
 
     try:
-        api_url = config.grok_api_url
-        api_key = config.grok_api_key
+        api_url = config.api_url
+        api_key = config.api_key
 
         # 构建 /models 端点 URL
         models_url = f"{api_url.rstrip('/')}/models"
@@ -235,22 +255,21 @@ async def get_config_info() -> str:
 @mcp.tool(
     name="update_config",
     description="""
-    Updates a Grok Search configuration field and persists it to config file.
+    Updates a configuration field and persists it to config file.
 
     Supported fields:
-    - GROK_API_URL: API endpoint URL
-    - GROK_API_KEY: API authentication key
-    - GROK_MODEL: Model ID (e.g., "grok-4-fast", "grok-2-latest")
-    - GROK_DEBUG: Enable debug mode (true/false)
-    - GROK_LOG_LEVEL: Logging level (DEBUG/INFO/WARNING/ERROR)
-    - GROK_LOG_DIR: Log directory path
-    - TAVILY_ENABLED: Enable Tavily integration (true/false)
-    - TAVILY_API_KEY: Tavily API key
+    - PROVIDER: Search provider ("grok" or "tavily")
+    - API_URL: API endpoint URL (for Grok provider)
+    - API_KEY: API authentication key
+    - MODEL: Model ID (e.g., "grok-4-fast", "grok-2-latest")
+    - DEBUG: Enable debug mode (true/false)
+    - LOG_LEVEL: Logging level (DEBUG/INFO/WARNING/ERROR)
+    - LOG_DIR: Log directory path
 
     Parameters
     ----------
     field : str
-        Configuration field name (case-sensitive, e.g., "GROK_MODEL")
+        Configuration field name (case-sensitive, e.g., "PROVIDER")
     value : str
         New value for the field
 

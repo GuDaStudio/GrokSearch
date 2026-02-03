@@ -35,6 +35,10 @@ class BaseSearchProvider(ABC):
     @abstractmethod
     async def search(self, query: str, max_results: int = 5) -> List[SearchResult]:
         pass
+    
+    @abstractmethod
+    async def fetch(self, url: str, ctx=None) -> str:
+        pass
 
     @abstractmethod
     def get_provider_name(self) -> str:

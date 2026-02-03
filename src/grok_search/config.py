@@ -14,14 +14,13 @@ class Config:
 
     # 字段名映射: 外部名 -> (config.json键, 环境变量名, 默认值, 类型)
     _FIELD_MAP = {
-        "GROK_API_URL": ("api_url", "GROK_API_URL", None, str),
-        "GROK_API_KEY": ("api_key", "GROK_API_KEY", None, str),
-        "GROK_MODEL": ("model", None, "grok-4-fast", str),
-        "GROK_DEBUG": ("debug", "GROK_DEBUG", False, bool),
-        "GROK_LOG_LEVEL": ("log_level", "GROK_LOG_LEVEL", "INFO", str),
-        "GROK_LOG_DIR": ("log_dir", "GROK_LOG_DIR", "logs", str),
-        "TAVILY_ENABLED": ("tavily_enabled", "TAVILY_ENABLED", False, bool),
-        "TAVILY_API_KEY": ("tavily_api_key", "TAVILY_API_KEY", None, str),
+        "API_URL": ("api_url", "GROK_API_URL", None, str),
+        "API_KEY": ("api_key", "GROK_API_KEY", None, str),
+        "MODEL": ("model", None, "grok-4-fast", str),
+        "DEBUG": ("debug", "GROK_DEBUG", False, bool),
+        "LOG_LEVEL": ("log_level", "GROK_LOG_LEVEL", "INFO", str),
+        "LOG_DIR": ("log_dir", "GROK_LOG_DIR", "logs", str),
+        "PROVIDER": ("provider", "PROVIDER", "grok", str),
     }
 
     def __new__(cls):
@@ -116,44 +115,40 @@ class Config:
 
     @property
     def debug_enabled(self) -> bool:
-        return self._get_value("GROK_DEBUG")
+        return self._get_value("DEBUG")
 
     @property
-    def grok_api_url(self) -> str:
-        url = self._get_value("GROK_API_URL")
+    def api_url(self) -> str:
+        url = self._get_value("API_URL")
         if not url:
             raise ValueError(
-                f"Grok API URL 未配置！\n"
+                f"API URL 未配置！\n"
                 f"请使用以下命令配置 MCP 服务器：\n{self._SETUP_COMMAND}"
             )
         return url
 
     @property
-    def grok_api_key(self) -> str:
-        key = self._get_value("GROK_API_KEY")
+    def api_key(self) -> str:
+        key = self._get_value("API_KEY")
         if not key:
             raise ValueError(
-                f"Grok API Key 未配置！\n"
+                f"API Key 未配置！\n"
                 f"请使用以下命令配置 MCP 服务器：\n{self._SETUP_COMMAND}"
             )
         return key
 
     @property
-    def tavily_enabled(self) -> bool:
-        return self._get_value("TAVILY_ENABLED")
-
-    @property
-    def tavily_api_key(self) -> str | None:
-        return self._get_value("TAVILY_API_KEY")
+    def provider(self) -> str:
+        return self._get_value("PROVIDER").lower()
 
     @property
     def log_level(self) -> str:
-        level = self._get_value("GROK_LOG_LEVEL")
+        level = self._get_value("LOG_LEVEL")
         return level.upper() if level else "INFO"
 
     @property
     def log_dir(self) -> Path:
-        log_dir_str = self._get_value("GROK_LOG_DIR") or "logs"
+        log_dir_str = self._get_value("LOG_DIR") or "logs"
         if Path(log_dir_str).is_absolute():
             return Path(log_dir_str)
         user_log_dir = Path.home() / ".config" / "grok-search" / log_dir_str
@@ -161,8 +156,8 @@ class Config:
         return user_log_dir
 
     @property
-    def grok_model(self) -> str:
-        return self._get_value("GROK_MODEL")
+    def model(self) -> str:
+        return self._get_value("MODEL")
 
     @staticmethod
     def _mask_api_key(key: str) -> str:
@@ -174,9 +169,8 @@ class Config:
     def get_config_info(self) -> dict:
         """获取配置信息（API Key 已脱敏）"""
         try:
-            api_url = self.grok_api_url
-            api_key_raw = self.grok_api_key
-            api_key_masked = self._mask_api_key(api_key_raw)
+            api_url = self.api_url
+            api_key_masked = self._mask_api_key(self.api_key)
             config_status = "✅ 配置完整"
         except ValueError as e:
             api_url = "未配置"
@@ -184,14 +178,13 @@ class Config:
             config_status = f"❌ 配置错误: {str(e)}"
 
         return {
-            "GROK_API_URL": api_url,
-            "GROK_API_KEY": api_key_masked,
-            "GROK_MODEL": self.grok_model,
-            "GROK_DEBUG": self.debug_enabled,
-            "GROK_LOG_LEVEL": self.log_level,
-            "GROK_LOG_DIR": str(self.log_dir),
-            "TAVILY_ENABLED": self.tavily_enabled,
-            "TAVILY_API_KEY": self._mask_api_key(self.tavily_api_key) if self.tavily_api_key else "未配置",
+            "PROVIDER": self.provider,
+            "API_URL": api_url,
+            "API_KEY": api_key_masked,
+            "MODEL": self.model,
+            "DEBUG": self.debug_enabled,
+            "LOG_LEVEL": self.log_level,
+            "LOG_DIR": str(self.log_dir),
             "config_status": config_status
         }
 

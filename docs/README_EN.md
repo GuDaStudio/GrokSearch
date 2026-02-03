@@ -46,7 +46,7 @@ Comparison with other search solutions:
 - ✅ Real-time web search + webpage content fetching
 - ✅ Support for platform-specific searches (Twitter, Reddit, GitHub, etc.)
 - ✅ Configuration testing tool (connection test + API Key masking)
-- ✅ Dynamic model switching (switch between Grok models with persistent settings)
+- ✅ **Multi-provider support (Grok / Tavily), dynamically switch via `update_config`**
 - ✅ **Tool routing control (one-click disable built-in WebSearch/WebFetch, force use GrokSearch)**
 - ✅ **Automatic time injection (automatically gets local time during search for accurate time-sensitive queries)**
 - ✅ Extensible architecture for additional search providers
@@ -90,6 +90,8 @@ wget -qO- https://astral.sh/uv/install.sh | sh
 ### 1. Installation & Configuration
 
 Use `claude mcp add-json` for one-click installation and configuration:
+
+**Note:** Replace **GROK_API_URL** and **GROK_API_KEY** with your own endpoint and key. Supports both Grok and Tavily providers, switch via `update_config` tool.
 
 ```bash
 claude mcp add-json grok-search --scope user '{
@@ -154,11 +156,13 @@ The tool will automatically perform the following checks:
 **Successful Output Example**:
 ```json
 {
-  "GROK_API_URL": "https://YOUR-API-URL/grok/v1",
-  "GROK_API_KEY": "sk-a*****************xyz",
-  "GROK_DEBUG": false,
-  "GROK_LOG_LEVEL": "INFO",
-  "GROK_LOG_DIR": "/home/user/.config/grok-search/logs",
+  "PROVIDER": "grok",
+  "API_URL": "https://YOUR-API-URL/grok/v1",
+  "API_KEY": "sk-a*****************xyz",
+  "MODEL": "grok-4-fast",
+  "DEBUG": false,
+  "LOG_LEVEL": "INFO",
+  "LOG_DIR": "/home/user/.config/grok-search/logs",
   "config_status": "✅ Configuration Complete",
   "connection_test": {
     "status": "✅ Connection Successful",
@@ -202,7 +206,7 @@ To better utilize Grok Search, you can optimize the overall Vibe Coding CLI by c
 | **web_search** | Real-time web search | `query` (required)<br>`platform` (optional: Twitter/GitHub/Reddit)<br>`min_results` / `max_results` | JSON Array<br>`{title, url, content}` | • Fact-checking<br>• Latest news<br>• Technical docs retrieval |
 | **web_fetch** | Webpage content fetching | `url` (required) | Structured Markdown<br>(with metadata header) | • Complete document retrieval<br>• In-depth content analysis<br>• Link content verification |
 | **get_config_info** | Configuration status detection | No parameters | JSON<br>`{api_url, status, connection_test}` | • Connection troubleshooting<br>• First-time use validation |
-| **switch_model** | Model switching | `model` (required) | JSON<br>`{status, previous_model, current_model, config_file}` | • Switch Grok models<br>• Performance/quality optimization<br>• Cross-session persistence |
+| **update_config** | Configuration modification | `field` (required), `value` (required) | JSON<br>`{status, old_value, new_value, config_file}` | • Switch providers<br>• Change model<br>• Cross-session persistence |
 | **toggle_builtin_tools** | Tool routing control | `action` (optional: on/off/status) | JSON<br>`{blocked, deny_list, file}` | • Disable built-in tools<br>• Force route to GrokSearch<br>• Project-level config management |
 
 ## 2. Search Workflow
@@ -371,11 +375,13 @@ For more information, visit [Official Documentation](https://modelcontextprotoco
 
 ```json
 {
-  "GROK_API_URL": "https://YOUR-API-URL/grok/v1",
-  "GROK_API_KEY": "sk-a*****************xyz",
-  "GROK_DEBUG": false,
-  "GROK_LOG_LEVEL": "INFO",
-  "GROK_LOG_DIR": "/home/user/.config/grok-search/logs",
+  "PROVIDER": "grok",
+  "API_URL": "https://YOUR-API-URL/grok/v1",
+  "API_KEY": "sk-a*****************xyz",
+  "MODEL": "grok-4-fast",
+  "DEBUG": false,
+  "LOG_LEVEL": "INFO",
+  "LOG_DIR": "/home/user/.config/grok-search/logs",
   "config_status": "✅ Configuration Complete",
   "connection_test": {
     "status": "✅ Connection Successful",
@@ -387,17 +393,26 @@ For more information, visit [Official Documentation](https://modelcontextprotoco
 
 </details>
 
-##### `switch_model` - Model Switching
+##### `update_config` - Configuration Modification
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `model` | string | ✅ | Model ID to switch to (e.g., `"grok-4-fast"`, `"grok-2-latest"`, `"grok-vision-beta"`) |
+| `field` | string | ✅ | Configuration field name (e.g., `"PROVIDER"`, `"MODEL"`, `"API_KEY"`) |
+| `value` | string | ✅ | New value for the field |
+
+**Supported Fields**:
+- `PROVIDER`: Search provider (`"grok"` or `"tavily"`)
+- `API_URL`: API endpoint URL (for Grok provider)
+- `API_KEY`: API authentication key
+- `MODEL`: Model ID (e.g., `"grok-4-fast"`, `"grok-2-latest"`)
+- `DEBUG`: Debug mode (`"true"` / `"false"`)
+- `LOG_LEVEL`: Log level (`"DEBUG"` / `"INFO"` / `"WARNING"` / `"ERROR"`)
+- `LOG_DIR`: Log directory path
 
 **Features**:
-- Switch the default Grok model used for search and fetch operations
-- Configuration automatically persisted to `~/.config/grok-search/config.json`
+- Modify configuration and auto-persist to `~/.config/grok-search/config.json`
+- Support switching providers (Grok / Tavily)
 - Cross-session settings retention
-- Suitable for performance optimization or quality comparison testing
 
 <details>
 <summary><b>Return Example</b> (Click to expand)</summary>
@@ -405,9 +420,9 @@ For more information, visit [Official Documentation](https://modelcontextprotoco
 ```json
 {
   "status": "✅ 成功",
-  "previous_model": "grok-4-fast",
-  "current_model": "grok-2-latest",
-  "message": "模型已从 grok-4-fast 切换到 grok-2-latest",
+  "field": "PROVIDER",
+  "old_value": "grok",
+  "new_value": "tavily",
   "config_file": "/home/user/.config/grok-search/config.json"
 }
 ```
@@ -416,12 +431,12 @@ For more information, visit [Official Documentation](https://modelcontextprotoco
 
 In Claude conversation, type:
 ```
-Please switch the Grok model to grok-2-latest
+Switch to Tavily search
 ```
 
 Or simply say:
 ```
-Switch model to grok-vision-beta
+Change model to grok-2-latest
 ```
 
 </details>
@@ -473,13 +488,14 @@ Show status of built-in tools
 
 ```
 src/grok_search/
-├── config.py          # Configuration management (environment variables)
+├── config.py          # Configuration management (environment variables + persistence)
 ├── server.py          # MCP service entry (tool registration)
 ├── logger.py          # Logging system
 ├── utils.py           # Formatting utilities
 └── providers/
     ├── base.py        # SearchProvider base class
-    └── grok.py        # Grok API implementation
+    ├── grok.py        # Grok API implementation
+    └── tavily.py      # Tavily API implementation
 ```
 
 </details>
