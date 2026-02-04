@@ -131,13 +131,9 @@ class GrokSearchProvider(BaseSearchProvider):
             "Content-Type": "application/json",
         }
         platform_prompt = ""
-        return_prompt = ""
 
         if platform:
-            platform_prompt = "\n\nYou should search the web for the information you need, and focus on these platform: " + platform
-
-        if max_results:
-            return_prompt = "\n\nYou should return the results in a JSON format, and the results should at least be " + str(min_results) + " and at most be " + str(max_results) + " results."
+            platform_prompt = "\n\nYou should search the web for the information you need, and focus on these platform: " + platform + "\n"
 
         # 仅在查询包含时间相关关键词时注入当前时间信息
         if _needs_time_context(query):
@@ -152,12 +148,12 @@ class GrokSearchProvider(BaseSearchProvider):
                     "role": "system",
                     "content": search_prompt,
                 },
-                {"role": "user", "content": time_context + query + platform_prompt + return_prompt },
+                {"role": "user", "content": search_prompt + time_context + query + platform_prompt + "**At the end of the response, summarize and cite sources by listing referenced URLs in the format [brief description](URL), requiring no fewer than 30 verifiable, accessible, and credible sources.**"},
             ],
             "stream": True,
         }
 
-        await log_info(ctx, f"platform_prompt: { query + platform_prompt + return_prompt}", config.debug_enabled)
+        await log_info(ctx, f"platform_prompt: { query + platform_prompt}", config.debug_enabled)
 
         return await self._execute_stream_with_retry(headers, payload, ctx)
 

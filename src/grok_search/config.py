@@ -81,7 +81,11 @@ class Config:
 
     @property
     def tavily_enabled(self) -> bool:
-        return os.getenv("TAVILY_ENABLED", "false").lower() in ("true", "1", "yes")
+        return os.getenv("TAVILY_ENABLED", "true").lower() in ("true", "1", "yes")
+
+    @property
+    def tavily_api_url(self) -> str:
+        return os.getenv("TAVILY_API_URL", "https://api.tavily.com")
 
     @property
     def tavily_api_key(self) -> str | None:
@@ -146,6 +150,7 @@ class Config:
             "GROK_DEBUG": self.debug_enabled,
             "GROK_LOG_LEVEL": self.log_level,
             "GROK_LOG_DIR": str(self.log_dir),
+            "TAVILY_API_URL": self.tavily_api_url,
             "TAVILY_ENABLED": self.tavily_enabled,
             "TAVILY_API_KEY": self._mask_api_key(self.tavily_api_key) if self.tavily_api_key else "未配置",
             "config_status": config_status

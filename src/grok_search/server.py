@@ -6,7 +6,9 @@ src_dir = Path(__file__).parent.parent
 if str(src_dir) not in sys.path:
     sys.path.insert(0, str(src_dir))
 
-from fastmcp import FastMCP, Context
+from mcp.server.fastmcp import FastMCP, Context
+from typing import Annotated, Optional
+from pydantic import Field
 
 # 尝试使用绝对导入（支持 mcp run）
 try:
@@ -28,129 +30,168 @@ mcp = FastMCP("grok-search")
 @mcp.tool(
     name="web_search",
     description="""
-    Performs a third-party web search based on the given query and returns the results
-    as a JSON string.
+    Performs a Grok web search based on the given query and returns the results as a JSON string.
 
-    The `query` should be a clear, self-contained natural-language search query.
-    When helpful, include constraints such as topic, time range, language, or domain.
+    **Key Features:**
+        - **Natural Language Query:** Accepts clear, self-contained search queries with optional constraints (topic, time range, language, domain).
+        - **Platform Filtering:** Focus searches on specific platforms like Twitter, GitHub, Reddit, etc.
+        - **Result Control:** Configure minimum and maximum results to balance coverage and response time.
 
-    The `platform` should be the platforms which you should focus on searching, such as "Twitter", "GitHub", "Reddit", etc.
-
-    The `min_results` and `max_results` should be the minimum and maximum number of results to return.
-
-    Returns
-    -------
-    str
-        A JSON-encoded string representing a list of search results. Each result
-        includes at least:
-        - `url`: the link to the result
-        - `title`: a short title
-        - `summary`: a brief description or snippet of the page content.
-    """
+    **Edge Cases & Best Practices:**
+        - Include time constraints in query for recent information (e.g., "Python 3.12 features 2024").
+        - Use platform parameter to narrow down results for domain-specific searches.
+        - Set higher min_results for comprehensive research, lower for quick lookups.
+    """,
+    meta={"version": "1.3.0", "author": "guda.studio"},
 )
-async def web_search(query: str, platform: str = "", min_results: int = 3, max_results: int = 10, ctx: Context = None) -> str:
+async def web_search(
+    query: Annotated[str, "Clear, self-contained natural-language search query. Include constraints such as topic, time range, language, or domain when helpful."],
+    platform: Annotated[str, "Target platform to focus on (e.g., 'Twitter', 'GitHub', 'Reddit'). Leave empty for general web search."] = ""
+) -> str:
     try:
         api_url = config.grok_api_url
         api_key = config.grok_api_key
         model = config.grok_model
     except ValueError as e:
         error_msg = str(e)
-        if ctx:
-            await ctx.report_progress(error_msg)
         return f"配置错误: {error_msg}"
 
     grok_provider = GrokSearchProvider(api_url, api_key, model)
 
-    await log_info(ctx, f"Begin Search: {query}", config.debug_enabled)
-    results = await grok_provider.search(query, platform, min_results, max_results, ctx)
-    await log_info(ctx, "Search Finished!", config.debug_enabled)
+    results = await grok_provider.search(query, platform)
     return results
+
+
+async def _call_tavily_extract(url: str) -> str:
+    import httpx
+    api_url = config.tavily_api_url
+    api_key = config.tavily_api_key
+    if not api_key:
+        return "配置错误: TAVILY_API_KEY 未配置，请设置环境变量 TAVILY_API_KEY"
+    endpoint = f"{api_url.rstrip('/')}/extract"
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    body = {"urls": [url], "format": "markdown"}
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(endpoint, headers=headers, json=body)
+            response.raise_for_status()
+            data = response.json()
+            if data.get("results") and len(data["results"]) > 0:
+                return data["results"][0].get("raw_content", "")
+            if data.get("failed_results") and len(data["failed_results"]) > 0:
+                return f"提取失败: {data['failed_results'][0]}"
+            return "提取失败: 无返回内容"
+    except httpx.TimeoutException:
+        return "提取超时: 请求超过60秒"
+    except httpx.HTTPStatusError as e:
+        return f"HTTP错误: {e.response.status_code} - {e.response.text[:200]}"
+    except Exception as e:
+        return f"提取错误: {str(e)}"
 
 
 @mcp.tool(
     name="web_fetch",
     description="""
-    Fetches and extracts the complete content from a specified URL and returns it
-    as a structured Markdown document.
-    The `url` should be a valid HTTP/HTTPS web address pointing to the target page.
-    Ensure the URL is complete and accessible (not behind authentication or paywalls).
-    The function will:
-    - Retrieve the full HTML content from the URL
-    - Parse and extract all meaningful content (text, images, links, tables, code blocks)
-    - Convert the HTML structure to well-formatted Markdown
-    - Preserve the original content hierarchy and formatting
-    - Remove scripts, styles, and other non-content elements
-    Returns
-    -------
-    str
-        A Markdown-formatted string containing:
-        - Metadata header (source URL, title, fetch timestamp)
-        - Table of Contents (if applicable)
-        - Complete page content with preserved structure
-        - All text, links, images, tables, and code blocks from the original page
-        
-        The output maintains 100% content fidelity with the source page and is
-        ready for documentation, analysis, or further processing.
-    Notes
-    -----
-    - Does NOT summarize or modify content - returns complete original text
-    - Handles special characters, encoding (UTF-8), and nested structures
-    - May not capture dynamically loaded content requiring JavaScript execution
-    - Respects the original language without translation
-    """
+    Fetches and extracts complete content from a URL, returning it as a structured Markdown document.
+
+    **Key Features:**
+        - **Full Content Extraction:** Retrieves and parses all meaningful content (text, images, links, tables, code blocks).
+        - **Markdown Conversion:** Converts HTML structure to well-formatted Markdown with preserved hierarchy.
+        - **Content Fidelity:** Maintains 100% content fidelity without summarization or modification.
+
+    **Edge Cases & Best Practices:**
+        - Ensure URL is complete and accessible (not behind authentication or paywalls).
+        - May not capture dynamically loaded content requiring JavaScript execution.
+        - Large pages may take longer to process; consider timeout implications.
+    """,
+    meta={"version": "1.3.0", "author": "guda.studio"},
 )
-async def web_fetch(url: str, ctx: Context = None) -> str:
-    try:
-        api_url = config.grok_api_url
-        api_key = config.grok_api_key
-        model = config.grok_model
-    except ValueError as e:
-        error_msg = str(e)
-        if ctx:
-            await ctx.report_progress(error_msg)
-        return f"配置错误: {error_msg}"
+async def web_fetch(
+    url: Annotated[str, "Valid HTTP/HTTPS web address pointing to the target page. Must be complete and accessible."],
+    ctx: Context = None
+) -> str:
     await log_info(ctx, f"Begin Fetch: {url}", config.debug_enabled)
-    grok_provider = GrokSearchProvider(api_url, api_key, model)
-    results = await grok_provider.fetch(url, ctx)
+    result = await _call_tavily_extract(url)
     await log_info(ctx, "Fetch Finished!", config.debug_enabled)
-    return results
+    return result
+
+
+async def _call_tavily_map(url: str, instructions: str = None, max_depth: int = 1,
+                           max_breadth: int = 20, limit: int = 50, timeout: int = 150) -> str:
+    import httpx
+    import json
+    api_url = config.tavily_api_url
+    api_key = config.tavily_api_key
+    if not api_key:
+        return "配置错误: TAVILY_API_KEY 未配置，请设置环境变量 TAVILY_API_KEY"
+    endpoint = f"{api_url.rstrip('/')}/map"
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    body = {"url": url, "max_depth": max_depth, "max_breadth": max_breadth, "limit": limit, "timeout": timeout}
+    if instructions:
+        body["instructions"] = instructions
+    try:
+        async with httpx.AsyncClient(timeout=float(timeout + 10)) as client:
+            response = await client.post(endpoint, headers=headers, json=body)
+            response.raise_for_status()
+            data = response.json()
+            return json.dumps({
+                "base_url": data.get("base_url", ""),
+                "results": data.get("results", []),
+                "response_time": data.get("response_time", 0)
+            }, ensure_ascii=False, indent=2)
+    except httpx.TimeoutException:
+        return f"映射超时: 请求超过{timeout}秒"
+    except httpx.HTTPStatusError as e:
+        return f"HTTP错误: {e.response.status_code} - {e.response.text[:200]}"
+    except Exception as e:
+        return f"映射错误: {str(e)}"
+
+
+@mcp.tool(
+    name="web_map",
+    description="""
+    Maps a website's structure by traversing it like a graph, discovering URLs and generating a comprehensive site map.
+
+    **Key Features:**
+        - **Graph Traversal:** Explores website structure starting from root URL.
+        - **Depth & Breadth Control:** Configure traversal limits to balance coverage and performance.
+        - **Instruction Filtering:** Use natural language to focus crawler on specific content types.
+
+    **Edge Cases & Best Practices:**
+        - Start with low max_depth (1-2) for initial exploration, increase if needed.
+        - Use instructions to filter for specific content (e.g., "only documentation pages").
+        - Large sites may hit timeout limits; adjust timeout and limit parameters accordingly.
+    """,
+    meta={"version": "1.3.0", "author": "guda.studio"},
+)
+async def web_map(
+    url: Annotated[str, "Root URL to begin the mapping (e.g., 'https://docs.example.com')."],
+    instructions: Annotated[str, "Natural language instructions for the crawler to filter or focus on specific content."] = "",
+    max_depth: Annotated[int, Field(description="Maximum depth of mapping from the base URL.", ge=1, le=5)] = 1,
+    max_breadth: Annotated[int, Field(description="Maximum number of links to follow per page.", ge=1, le=500)] = 20,
+    limit: Annotated[int, Field(description="Total number of links to process before stopping.", ge=1, le=500)] = 50,
+    timeout: Annotated[int, Field(description="Maximum time in seconds for the operation.", ge=10, le=150)] = 150
+) -> str:
+    result = await _call_tavily_map(url, instructions, max_depth, max_breadth, limit, timeout)
+    return result
 
 
 @mcp.tool(
     name="get_config_info",
     description="""
-    Returns the current Grok Search MCP server configuration information and tests the connection.
+    Returns current Grok Search MCP server configuration and tests API connectivity.
 
-    This tool is useful for:
-    - Verifying that environment variables are correctly configured
-    - Testing API connectivity by sending a request to /models endpoint
-    - Debugging configuration issues
-    - Checking the current API endpoint and settings
+    **Key Features:**
+        - **Configuration Check:** Verifies environment variables and current settings.
+        - **Connection Test:** Sends request to /models endpoint to validate API access.
+        - **Model Discovery:** Lists all available models from the API.
 
-    Returns
-    -------
-    str
-        A JSON-encoded string containing configuration details:
-        - `api_url`: The configured Grok API endpoint
-        - `api_key`: The API key (masked for security, showing only first and last 4 characters)
-        - `model`: The currently selected model for search and fetch operations
-        - `debug_enabled`: Whether debug mode is enabled
-        - `log_level`: Current logging level
-        - `log_dir`: Directory where logs are stored
-        - `config_status`: Overall configuration status (✅ complete or ❌ error)
-        - `connection_test`: Result of testing API connectivity to /models endpoint
-          - `status`: Connection status
-          - `message`: Status message with model count
-          - `response_time_ms`: API response time in milliseconds
-          - `available_models`: List of available model IDs (only present on successful connection)
-
-    Notes
-    -----
-    - API keys are automatically masked for security
-    - This tool does not require any parameters
-    - Useful for troubleshooting before making actual search requests
-    - Automatically tests API connectivity during execution
-    """
+    **Edge Cases & Best Practices:**
+        - Use this tool first when debugging connection or configuration issues.
+        - API keys are automatically masked for security in the response.
+        - Connection test timeout is 10 seconds; network issues may cause delays.
+    """,
+    meta={"version": "1.3.0", "author": "guda.studio"},
 )
 async def get_config_info() -> str:
     import json
@@ -235,36 +276,23 @@ async def get_config_info() -> str:
 @mcp.tool(
     name="switch_model",
     description="""
-    Switches the default Grok model used for search and fetch operations, and persists the setting.
+    Switches the default Grok model used for search and fetch operations, persisting the setting.
 
-    This tool is useful for:
-    - Changing the AI model used for web search and content fetching
-    - Testing different models for performance or quality comparison
-    - Persisting model preference across sessions
+    **Key Features:**
+        - **Model Selection:** Change the AI model for web search and content fetching.
+        - **Persistent Storage:** Model preference saved to ~/.config/grok-search/config.json.
+        - **Immediate Effect:** New model used for all subsequent operations.
 
-    Parameters
-    ----------
-    model : str
-        The model ID to switch to (e.g., "grok-4-fast", "grok-2-latest", "grok-vision-beta")
-
-    Returns
-    -------
-    str
-        A JSON-encoded string containing:
-        - `status`: Success or error status
-        - `previous_model`: The model that was being used before
-        - `current_model`: The newly selected model
-        - `message`: Status message
-        - `config_file`: Path where the model preference is saved
-
-    Notes
-    -----
-    - The model setting is persisted to ~/.config/grok-search/config.json
-    - This setting will be used for all future search and fetch operations
-    - You can verify available models using the get_config_info tool
-    """
+    **Edge Cases & Best Practices:**
+        - Use get_config_info to verify available models before switching.
+        - Invalid model IDs may cause API errors in subsequent requests.
+        - Model changes persist across sessions until explicitly changed again.
+    """,
+    meta={"version": "1.3.0", "author": "guda.studio"},
 )
-async def switch_model(model: str) -> str:
+async def switch_model(
+    model: Annotated[str, "Model ID to switch to (e.g., 'grok-4-fast', 'grok-2-latest', 'grok-vision-beta')."]
+) -> str:
     import json
 
     try:
@@ -301,11 +329,21 @@ async def switch_model(model: str) -> str:
     description="""
     Toggle Claude Code's built-in WebSearch and WebFetch tools on/off.
 
-    Parameters: action - "on" (block built-in), "off" (allow built-in), "status" (check)
-    Returns: JSON with current status and deny list
-    """
+    **Key Features:**
+        - **Tool Control:** Enable or disable Claude Code's native web tools.
+        - **Project Scope:** Changes apply to current project's .claude/settings.json.
+        - **Status Check:** Query current state without making changes.
+
+    **Edge Cases & Best Practices:**
+        - Use "on" to block built-in tools when preferring this MCP server's implementation.
+        - Use "off" to restore Claude Code's native tools.
+        - Use "status" to check current configuration without modification.
+    """,
+    meta={"version": "1.3.0", "author": "guda.studio"},
 )
-async def toggle_builtin_tools(action: str = "status") -> str:
+async def toggle_builtin_tools(
+    action: Annotated[str, "Action to perform: 'on' (block built-in), 'off' (allow built-in), or 'status' (check current state)."] = "status"
+) -> str:
     import json
 
     # Locate project root
