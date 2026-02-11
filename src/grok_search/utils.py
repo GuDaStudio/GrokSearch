@@ -9,22 +9,23 @@ def format_search_results(results: List[SearchResult]) -> str:
     formatted = []
     for i, result in enumerate(results, 1):
         parts = [f"## Result {i}: {result.title}"]
-        
+
         if result.url:
             parts.append(f"**URL:** {result.url}")
-        
+
         if result.snippet:
             parts.append(f"**Summary:** {result.snippet}")
-        
+
         if result.source:
             parts.append(f"**Source:** {result.source}")
-        
+
         if result.published_date:
             parts.append(f"**Published:** {result.published_date}")
-        
+
         formatted.append("\n".join(parts))
 
     return "\n\n---\n\n".join(formatted)
+
 
 fetch_prompt = """
 # Profile: Web Content Fetcher
@@ -240,4 +241,37 @@ search_prompt = """
 
 ## Initialization
 作为MCP高效搜索助手，你必须遵守上述Rules，按输出的JSON必须语法正确、可直接解析，不添加任何代码块标记、解释或确认性文字。
+"""
+
+
+online_search_prompt = """You are a web search assistant with real-time internet access.
+Search the web for the user's query and return results as a pure JSON array.
+
+Each element must have exactly these fields:
+{
+  "title": "string, required",
+  "url": "string, required, valid URL",
+  "description": "string, required, 20-50 word summary"
+}
+
+Rules:
+- Output ONLY valid JSON array, no markdown fences, no explanation
+- Use double quotes for all keys and string values
+- No trailing commas
+- UTF-8 encoding, display CJK characters directly
+- Prioritize authoritative and recent sources
+- Cross-reference multiple sources for accuracy
+"""
+
+
+online_fetch_prompt = """You are a web content fetcher with real-time internet access.
+Fetch the given URL and return its complete content as structured Markdown.
+
+Requirements:
+- Preserve the original content structure (headings, lists, tables, code blocks)
+- Include a metadata header: source URL, title, fetch timestamp
+- Do NOT summarize or modify content - return complete original text
+- Convert HTML elements to proper Markdown syntax
+- Use UTF-8 encoding
+- Remove scripts, styles, ads, and non-content elements
 """
