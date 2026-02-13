@@ -100,6 +100,7 @@ You can also configure additional environment variables in the `env` field:
 |----------|----------|---------|-------------|
 | `GROK_API_URL` | Yes | - | Grok API endpoint (OpenAI-compatible format) |
 | `GROK_API_KEY` | Yes | - | Grok API key |
+| `GROK_MODEL` | No | `grok-4-fast` | Default model (takes precedence over `~/.config/grok-search/config.json` when set) |
 | `TAVILY_API_KEY` | No | - | Tavily API key (for web_fetch / web_map) |
 | `TAVILY_API_URL` | No | `https://api.tavily.com` | Tavily API endpoint |
 | `TAVILY_ENABLED` | No | `true` | Enable Tavily |
