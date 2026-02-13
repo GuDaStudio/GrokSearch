@@ -35,6 +35,7 @@ mcp = FastMCP("grok-search")
     **Key Features:**
         - **Natural Language Query:** Accepts clear, self-contained search queries with optional constraints (topic, time range, language, domain).
         - **Platform Filtering:** Focus searches on specific platforms like Twitter, GitHub, Reddit, etc.
+        - **Per-request Model Override:** Set `model` only when explicitly needed for a single request. If omitted, the server default model is used.
         - **Result Control:** Configure minimum and maximum results to balance coverage and response time.
 
     **Edge Cases & Best Practices:**
@@ -46,17 +47,22 @@ mcp = FastMCP("grok-search")
 )
 async def web_search(
     query: Annotated[str, "Clear, self-contained natural-language search query. Include constraints such as topic, time range, language, or domain when helpful."],
-    platform: Annotated[str, "Target platform to focus on (e.g., 'Twitter', 'GitHub', 'Reddit'). Leave empty for general web search."] = ""
+    platform: Annotated[str, "Target platform to focus on (e.g., 'Twitter', 'GitHub', 'Reddit'). Leave empty for general web search."] = "",
+    model: Annotated[str, "Optional model ID for this request only. This value is used ONLY when user explicitly provided."] = "",
 ) -> str:
     try:
         api_url = config.grok_api_url
         api_key = config.grok_api_key
-        model = config.grok_model
     except ValueError as e:
         error_msg = str(e)
         return f"配置错误: {error_msg}"
 
-    grok_provider = GrokSearchProvider(api_url, api_key, model)
+    if model != "":
+        effective_model = model
+    else:
+        effective_model = config.grok_model
+
+    grok_provider = GrokSearchProvider(api_url, api_key, effective_model)
 
     results = await grok_provider.search(query, platform)
     return results
