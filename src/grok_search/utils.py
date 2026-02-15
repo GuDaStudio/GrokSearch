@@ -7,7 +7,7 @@ def format_extra_sources(tavily_results: list[dict] | None, firecrawl_results: l
     idx = 1
     urls = []
     if firecrawl_results:
-        lines = ["## Trustworthy reference sources for you"]
+        lines = ["## Extra Sources [Firecrawl]"]
         for r in firecrawl_results:
             title = r.get("title") or "Untitled"
             url = r.get("url", "")
@@ -23,15 +23,12 @@ def format_extra_sources(tavily_results: list[dict] | None, firecrawl_results: l
             idx += 1
         sections.append("\n".join(lines))
     if tavily_results:
-        lines = []
+        lines = ["## Extra Sources [Tavily]"]
         for r in tavily_results:
             title = r.get("title") or "Untitled"
             url = r.get("url", "")
-            if len(url) == 0:
-                continue
             if url in urls:
                 continue
-            urls.append(url)
             content = r.get("content", "")
             lines.append(f"{idx}. **[{title}]({url})**")
             if content:

@@ -144,7 +144,7 @@ async def _call_tavily_search(query: str, max_results: int = 6) -> list[dict] | 
         "include_answer": False,
     }
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=90.0) as client:
             response = await client.post(endpoint, headers=headers, json=body)
             response.raise_for_status()
             data = response.json()
@@ -166,7 +166,7 @@ async def _call_firecrawl_search(query: str, limit: int = 14) -> list[dict] | No
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     body = {"query": query, "limit": limit}
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=90.0) as client:
             response = await client.post(endpoint, headers=headers, json=body)
             response.raise_for_status()
             data = response.json()
