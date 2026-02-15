@@ -170,7 +170,7 @@ async def _call_firecrawl_search(query: str, limit: int = 14) -> list[dict] | No
             response = await client.post(endpoint, headers=headers, json=body)
             response.raise_for_status()
             data = response.json()
-            results = data.get("data", [])
+            results = data.get("data", {}).get("web", [])
             return [
                 {"title": r.get("title", ""), "url": r.get("url", ""), "description": r.get("description", "")}
                 for r in results
