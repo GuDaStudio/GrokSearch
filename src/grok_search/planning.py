@@ -30,14 +30,14 @@ class SubQuery(BaseModel):
     goal: str
     expected_output: str = Field(description="What a successful result looks like")
     tool_hint: Optional[str] = Field(default=None, description="Suggested tool: web_search | web_fetch | web_map")
-    boundary: str = Field(description="What this sub-query explicitly excludes")
+    boundary: str = Field(description="What this sub-query explicitly excludes — MUST state mutual exclusion with sibling sub-queries, not just the broader domain")
     depends_on: Optional[list[str]] = Field(default=None, description="IDs of prerequisite sub-queries")
 
 
 class SearchTerm(BaseModel):
-    term: str = Field(description="Search query string (keep under 8 words)")
-    purpose: str = Field(description="Which sub-query this serves")
-    round: int = Field(ge=1, description="Execution round number")
+    term: str = Field(description="Search query string. MUST be ≤8 words. Drop redundant synonyms (e.g., use 'RAG' not 'RAG retrieval augmented generation').")
+    purpose: str = Field(description="Single sub-query ID this term serves (e.g., 'sq2'). ONE term per sub-query — do NOT combine like 'sq1+sq2'.")
+    round: int = Field(ge=1, description="Execution round: 1=broad discovery, 2+=targeted follow-up refined by round 1 findings")
 
 
 class StrategyOutput(BaseModel):
@@ -148,7 +148,7 @@ class PlanningEngine:
             "plan_complete": complete,
         }
 
-        remaining = sorted(session.required_phases() - session.phases.keys())
+        remaining = [p for p in PHASE_NAMES if p in session.required_phases() and p not in session.phases]
         if remaining:
             result["phases_remaining"] = remaining
 

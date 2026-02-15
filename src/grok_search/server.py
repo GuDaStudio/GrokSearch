@@ -557,11 +557,11 @@ async def toggle_builtin_tools(
     - **Level 3** (6+ searches): all 6 phases
 
     ### 3. `query_decomposition` → fill `sub_queries`
-    Split into non-overlapping sub-queries. Each needs a clear `boundary` (what it EXCLUDES). Use `depends_on` for sequential dependencies.
+    Split into non-overlapping sub-queries along ONE decomposition axis (e.g., by venue type OR by technique — never both). Each `boundary` must state mutual exclusion with sibling sub-queries. Use `depends_on` for sequential dependencies.
 
     ### 4. `search_strategy` → fill `strategy`
-    Design concise search terms (max 8 words each). Choose approach:
-    - `broad_first`: wide scan then narrow (exploratory)
+    Design concise search terms (max 8 words each). One term serves one sub-query. Choose approach:
+    - `broad_first`: round 1 wide scan → round 2+ narrow based on findings (exploratory)
     - `narrow_first`: precise first, expand if needed (analytical)
     - `targeted`: known-item retrieval (factual)
 
@@ -575,10 +575,16 @@ async def toggle_builtin_tools(
     Group independent sub-queries into parallel batches. Sequence dependent ones.
 
     ## Anti-patterns (AVOID)
-    - Search terms >8 words → split or simplify
-    - Overlapping sub-query scopes → merge or sharpen boundaries
-    - Level 3 for simple "what is X?" → Level 1 suffices
-    - Skipping intent_analysis → always start here
+    - ❌ `codebase RAG retrieval augmented generation 2024 2025 paper` (9 words, synonym stacking)
+      ✅ `codebase RAG papers 2024` (4 words, concise)
+    - ❌ purpose: "sq1+sq2" (merged scope defeats decomposition)
+      ✅ purpose: "sq2" (one term, one goal)
+    - ❌ Decompose by venue (sq1=SE, sq2=AI) AND by technique (sq3=indexing, sq4=repo-level) — creates overlapping matrix
+      ✅ Pick ONE axis: by venue (sq1=SE, sq2=AI, sq3=IR) OR by technique (sq1=RAG systems, sq2=indexing, sq3=retrieval)
+    - ❌ All terms round 1 with broad_first (no depth)
+      ✅ Round 1: broad terms → Round 2: refined by Round 1 findings
+    - ❌ Level 3 for simple "what is X?" → Level 1 suffices
+    - ❌ Skipping intent_analysis → always start here
 
     ## Session & Revision
     First call: leave `session_id` empty → server returns one. Pass it back in subsequent calls.
