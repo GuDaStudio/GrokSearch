@@ -548,7 +548,7 @@ async def toggle_builtin_tools(
     ## Phases (call in order, one per invocation)
 
     ### 1. `intent_analysis` → fill `intent`
-    Distill the user's real question. Classify type and time sensitivity. Surface ambiguities and flawed premises.
+    Distill the user's real question. Classify type and time sensitivity. Surface ambiguities and flawed premises. Identify `unverified_terms` — external classifications/rankings/taxonomies (e.g., "CCF-A", "Fortune 500") whose contents you cannot reliably enumerate from memory.
 
     ### 2. `complexity_assessment` → fill `complexity`
     Rate 1-3. This controls how many phases are required:
@@ -558,6 +558,7 @@ async def toggle_builtin_tools(
 
     ### 3. `query_decomposition` → fill `sub_queries`
     Split into non-overlapping sub-queries along ONE decomposition axis (e.g., by venue type OR by technique — never both). Each `boundary` must state mutual exclusion with sibling sub-queries. Use `depends_on` for sequential dependencies.
+    **Prerequisite rule**: If Phase 1 identified `unverified_terms`, create a prerequisite sub-query to verify each term's current contents FIRST. Other sub-queries must `depends_on` it — do NOT hardcode assumed values from training data.
 
     ### 4. `search_strategy` → fill `strategy`
     Design concise search terms (max 8 words each). One term serves one sub-query. Choose approach:

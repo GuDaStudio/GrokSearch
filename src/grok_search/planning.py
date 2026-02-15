@@ -14,6 +14,12 @@ class IntentOutput(BaseModel):
     domain: Optional[str] = Field(default=None, description="Specific domain if identifiable")
     premise_valid: Optional[bool] = Field(default=None, description="False if the question contains a flawed assumption")
     ambiguities: Optional[list[str]] = Field(default=None, description="Unresolved ambiguities that may affect search direction")
+    unverified_terms: Optional[list[str]] = Field(
+        default=None,
+        description="External classifications, rankings, or taxonomies that may be incomplete or outdated "
+        "in training data (e.g., 'CCF-A', 'Fortune 500', 'OWASP Top 10'). "
+        "Each should become a prerequisite sub-query in Phase 3."
+    )
 
 
 class ComplexityOutput(BaseModel):
