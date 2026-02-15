@@ -16,12 +16,21 @@ try:
     from grok_search.utils import format_search_results, format_extra_sources
     from grok_search.logger import log_info
     from grok_search.config import config
+    from grok_search.planning import (
+        IntentOutput, ComplexityOutput, SubQuery,
+        StrategyOutput, ToolPlanItem, ExecutionOrderOutput,
+        engine as planning_engine,
+    )
 except ImportError:
-    # 降级到相对导入（pip install -e . 后）
     from .providers.grok import GrokSearchProvider
     from .utils import format_search_results, format_extra_sources
     from .logger import log_info
     from .config import config
+    from .planning import (
+        IntentOutput, ComplexityOutput, SubQuery,
+        StrategyOutput, ToolPlanItem, ExecutionOrderOutput,
+        engine as planning_engine,
+    )
 
 import asyncio
 
@@ -30,6 +39,7 @@ mcp = FastMCP("grok-search")
 @mcp.tool(
     name="web_search",
     description="""
+    Before using this tool, please use the search_planning tool to plan the search carefully.
     Performs a deep web search based on the given query and returns the results as a JSON string.
     """,
     meta={"version": "1.4.0", "author": "guda.studio"},
@@ -524,6 +534,99 @@ async def toggle_builtin_tools(
         "file": str(settings_path),
         "message": msg
     }, ensure_ascii=False, indent=2)
+
+
+@mcp.tool(
+    name="search_planning",
+    description="""
+    A structured thinking scaffold for planning web searches BEFORE execution. Produces no side effects — only organizes your reasoning into a reusable plan.
+
+    **WHEN TO USE**: Before any search requiring 2+ tool calls, or when the query is ambiguous/multi-faceted. Skip for single obvious lookups.
+
+    **HOW**: Call once per phase, filling only that phase's structured field. The server tracks your session and signals when the plan is complete.
+
+    ## Phases (call in order, one per invocation)
+
+    ### 1. `intent_analysis` → fill `intent`
+    Distill the user's real question. Classify type and time sensitivity. Surface ambiguities and flawed premises.
+
+    ### 2. `complexity_assessment` → fill `complexity`
+    Rate 1-3. This controls how many phases are required:
+    - **Level 1** (1-2 searches): phases 1-3 only → then execute
+    - **Level 2** (3-5 searches): phases 1-5
+    - **Level 3** (6+ searches): all 6 phases
+
+    ### 3. `query_decomposition` → fill `sub_queries`
+    Split into non-overlapping sub-queries. Each needs a clear `boundary` (what it EXCLUDES). Use `depends_on` for sequential dependencies.
+
+    ### 4. `search_strategy` → fill `strategy`
+    Design concise search terms (max 8 words each). Choose approach:
+    - `broad_first`: wide scan then narrow (exploratory)
+    - `narrow_first`: precise first, expand if needed (analytical)
+    - `targeted`: known-item retrieval (factual)
+
+    ### 5. `tool_selection` → fill `tool_plan`
+    Map each sub-query to optimal tool:
+    - **web_search**(query, platform?, extra_sources?): general retrieval
+    - **web_fetch**(url): extract full markdown from known URL
+    - **web_map**(url, instructions?, max_depth?): discover site structure
+
+    ### 6. `execution_order` → fill `execution_order`
+    Group independent sub-queries into parallel batches. Sequence dependent ones.
+
+    ## Anti-patterns (AVOID)
+    - Search terms >8 words → split or simplify
+    - Overlapping sub-query scopes → merge or sharpen boundaries
+    - Level 3 for simple "what is X?" → Level 1 suffices
+    - Skipping intent_analysis → always start here
+
+    ## Session & Revision
+    First call: leave `session_id` empty → server returns one. Pass it back in subsequent calls.
+    To revise: set `is_revision=true` + `revises_phase` to overwrite a previous phase.
+    Plan auto-completes when all required phases (per complexity level) are filled.
+    """,
+    meta={"version": "1.0.0", "author": "guda.studio"},
+)
+async def search_planning(
+    phase: Annotated[str, "Current phase: intent_analysis | complexity_assessment | query_decomposition | search_strategy | tool_selection | execution_order"],
+    thought: Annotated[str, "Your reasoning for this phase — explain WHY, not just WHAT"],
+    next_phase_needed: Annotated[bool, "true to continue planning, false when done or plan auto-completes"],
+    intent: Optional[IntentOutput] = None,
+    complexity: Optional[ComplexityOutput] = None,
+    sub_queries: Optional[list[SubQuery]] = None,
+    strategy: Optional[StrategyOutput] = None,
+    tool_plan: Optional[list[ToolPlanItem]] = None,
+    execution_order: Optional[ExecutionOrderOutput] = None,
+    session_id: Annotated[str, "Session ID from previous call. Empty for new session."] = "",
+    is_revision: Annotated[bool, "true to revise a previously completed phase"] = False,
+    revises_phase: Annotated[str, "Phase name to revise (required if is_revision=true)"] = "",
+    confidence: Annotated[float, "Confidence in this phase's output (0.0-1.0)"] = 1.0,
+) -> str:
+    import json
+
+    phase_data_map = {
+        "intent_analysis": intent.model_dump() if intent else None,
+        "complexity_assessment": complexity.model_dump() if complexity else None,
+        "query_decomposition": [sq.model_dump() for sq in sub_queries] if sub_queries else None,
+        "search_strategy": strategy.model_dump() if strategy else None,
+        "tool_selection": [tp.model_dump() for tp in tool_plan] if tool_plan else None,
+        "execution_order": execution_order.model_dump() if execution_order else None,
+    }
+
+    target = revises_phase if is_revision and revises_phase else phase
+    phase_data = phase_data_map.get(target)
+
+    result = planning_engine.process_phase(
+        phase=phase,
+        thought=thought,
+        session_id=session_id,
+        is_revision=is_revision,
+        revises_phase=revises_phase,
+        confidence=confidence,
+        phase_data=phase_data,
+    )
+
+    return json.dumps(result, ensure_ascii=False, indent=2)
 
 
 def main():
