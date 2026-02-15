@@ -30,24 +30,12 @@ mcp = FastMCP("grok-search")
 @mcp.tool(
     name="web_search",
     description="""
-    Performs a Grok web search based on the given query and returns the results as a JSON string.
-
-    **Key Features:**
-        - **Natural Language Query:** Accepts clear, self-contained search queries with optional constraints (topic, time range, language, domain).
-        - **Platform Filtering:** Focus searches on specific platforms like Twitter, GitHub, Reddit, etc.
-        - **Per-request Model Override:** Set `model` only when explicitly needed for a single request. If omitted, the server default model is used.
-        - **Result Control:** Configure minimum and maximum results to balance coverage and response time.
-        - **Extra Sources:** When Tavily/Firecrawl API keys are configured, automatically queries them in parallel as supplementary references (Firecrawl 70%, Tavily 30%). Set `extra_sources=0` to disable.
-
-    **Edge Cases & Best Practices:**
-        - Include time constraints in query for recent information (e.g., "Python 3.12 features 2024").
-        - Use platform parameter to narrow down results for domain-specific searches.
-        - Set higher min_results for comprehensive research, lower for quick lookups.
+    Performs a deep web search based on the given query and returns the results as a JSON string.
     """,
     meta={"version": "1.4.0", "author": "guda.studio"},
 )
 async def web_search(
-    query: Annotated[str, "Clear, self-contained natural-language search query. Include constraints such as topic, time range, language, or domain when helpful."],
+    query: Annotated[str, "Clear, self-contained natural-language search query."],
     platform: Annotated[str, "Target platform to focus on (e.g., 'Twitter', 'GitHub', 'Reddit'). Leave empty for general web search."] = "",
     model: Annotated[str, "Optional model ID for this request only. This value is used ONLY when user explicitly provided."] = "",
     extra_sources: Annotated[int, "Number of additional reference results from Tavily/Firecrawl. Set 0 to disable. Default 20."] = 20,
