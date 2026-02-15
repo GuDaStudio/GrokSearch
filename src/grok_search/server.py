@@ -13,13 +13,13 @@ from pydantic import Field
 # 尝试使用绝对导入（支持 mcp run）
 try:
     from grok_search.providers.grok import GrokSearchProvider
-    from grok_search.utils import format_search_results
+    from grok_search.utils import format_search_results, format_extra_sources
     from grok_search.logger import log_info
     from grok_search.config import config
 except ImportError:
     # 降级到相对导入（pip install -e . 后）
     from .providers.grok import GrokSearchProvider
-    from .utils import format_search_results
+    from .utils import format_search_results, format_extra_sources
     from .logger import log_info
     from .config import config
 
@@ -37,35 +37,86 @@ mcp = FastMCP("grok-search")
         - **Platform Filtering:** Focus searches on specific platforms like Twitter, GitHub, Reddit, etc.
         - **Per-request Model Override:** Set `model` only when explicitly needed for a single request. If omitted, the server default model is used.
         - **Result Control:** Configure minimum and maximum results to balance coverage and response time.
+        - **Extra Sources:** When Tavily/Firecrawl API keys are configured, automatically queries them in parallel as supplementary references (Firecrawl 70%, Tavily 30%). Set `extra_sources=0` to disable.
 
     **Edge Cases & Best Practices:**
         - Include time constraints in query for recent information (e.g., "Python 3.12 features 2024").
         - Use platform parameter to narrow down results for domain-specific searches.
         - Set higher min_results for comprehensive research, lower for quick lookups.
     """,
-    meta={"version": "1.3.0", "author": "guda.studio"},
+    meta={"version": "1.4.0", "author": "guda.studio"},
 )
 async def web_search(
     query: Annotated[str, "Clear, self-contained natural-language search query. Include constraints such as topic, time range, language, or domain when helpful."],
     platform: Annotated[str, "Target platform to focus on (e.g., 'Twitter', 'GitHub', 'Reddit'). Leave empty for general web search."] = "",
     model: Annotated[str, "Optional model ID for this request only. This value is used ONLY when user explicitly provided."] = "",
+    extra_sources: Annotated[int, "Number of additional reference results from Tavily/Firecrawl. Set 0 to disable. Default 20."] = 20,
 ) -> str:
     try:
         api_url = config.grok_api_url
         api_key = config.grok_api_key
     except ValueError as e:
-        error_msg = str(e)
-        return f"配置错误: {error_msg}"
+        return f"配置错误: {str(e)}"
 
-    if model != "":
-        effective_model = model
-    else:
-        effective_model = config.grok_model
-
+    effective_model = model if model != "" else config.grok_model
     grok_provider = GrokSearchProvider(api_url, api_key, effective_model)
 
-    results = await grok_provider.search(query, platform)
-    return results
+    # 计算额外信源配额
+    has_tavily = bool(config.tavily_api_key)
+    has_firecrawl = bool(config.firecrawl_api_key)
+    firecrawl_count = 0
+    tavily_count = 0
+    if extra_sources > 0:
+        if has_firecrawl and has_tavily:
+            firecrawl_count = round(extra_sources * 0.7)
+            tavily_count = extra_sources - firecrawl_count
+        elif has_firecrawl:
+            firecrawl_count = extra_sources
+        elif has_tavily:
+            tavily_count = extra_sources
+
+    # 并行执行搜索任务
+    async def _safe_grok() -> str:
+        try:
+            return await grok_provider.search(query, platform)
+        except Exception:
+            return ""
+
+    async def _safe_tavily() -> list[dict] | None:
+        try:
+            return await _call_tavily_search(query, tavily_count)
+        except Exception:
+            return None
+
+    async def _safe_firecrawl() -> list[dict] | None:
+        try:
+            return await _call_firecrawl_search(query, firecrawl_count)
+        except Exception:
+            return None
+
+    coros: list = [_safe_grok()]
+    if tavily_count > 0:
+        coros.append(_safe_tavily())
+    if firecrawl_count > 0:
+        coros.append(_safe_firecrawl())
+
+    gathered = await asyncio.gather(*coros)
+
+    grok_result: str = gathered[0]
+    tavily_results: list[dict] | None = None
+    firecrawl_results: list[dict] | None = None
+    idx = 1
+    if tavily_count > 0:
+        tavily_results = gathered[idx]
+        idx += 1
+    if firecrawl_count > 0:
+        firecrawl_results = gathered[idx]
+
+    # 合并结果
+    extra_text = format_extra_sources(tavily_results, firecrawl_results)
+    if extra_text:
+        return f"{grok_result}\n\n---\n\n{extra_text}"
+    return grok_result
 
 
 async def _call_tavily_extract(url: str) -> str | None:
@@ -86,6 +137,56 @@ async def _call_tavily_extract(url: str) -> str | None:
                 content = data["results"][0].get("raw_content", "")
                 return content if content and content.strip() else None
             return None
+    except Exception:
+        return None
+
+
+async def _call_tavily_search(query: str, max_results: int = 6) -> list[dict] | None:
+    import httpx
+    api_key = config.tavily_api_key
+    if not api_key:
+        return None
+    endpoint = f"{config.tavily_api_url.rstrip('/')}/search"
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    body = {
+        "query": query,
+        "max_results": max_results,
+        "search_depth": "advanced",
+        "include_raw_content": False,
+        "include_answer": False,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(endpoint, headers=headers, json=body)
+            response.raise_for_status()
+            data = response.json()
+            results = data.get("results", [])
+            return [
+                {"title": r.get("title", ""), "url": r.get("url", ""), "content": r.get("content", ""), "score": r.get("score", 0)}
+                for r in results
+            ] if results else None
+    except Exception:
+        return None
+
+
+async def _call_firecrawl_search(query: str, limit: int = 14) -> list[dict] | None:
+    import httpx
+    api_key = config.firecrawl_api_key
+    if not api_key:
+        return None
+    endpoint = f"{config.firecrawl_api_url.rstrip('/')}/search"
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    body = {"query": query, "limit": limit}
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(endpoint, headers=headers, json=body)
+            response.raise_for_status()
+            data = response.json()
+            results = data.get("data", [])
+            return [
+                {"title": r.get("title", ""), "url": r.get("url", ""), "description": r.get("description", "")}
+                for r in results
+            ] if results else None
     except Exception:
         return None
 

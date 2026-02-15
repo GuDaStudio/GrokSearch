@@ -2,6 +2,45 @@ from typing import List
 from .providers.base import SearchResult
 
 
+def format_extra_sources(tavily_results: list[dict] | None, firecrawl_results: list[dict] | None) -> str:
+    sections = []
+    idx = 1
+    urls = []
+    if firecrawl_results:
+        lines = ["## Trustworthy reference sources for you"]
+        for r in firecrawl_results:
+            title = r.get("title") or "Untitled"
+            url = r.get("url", "")
+            if len(url) == 0:
+                continue
+            if url in urls:
+                continue
+            urls.append(url)
+            desc = r.get("description", "")
+            lines.append(f"{idx}. **[{title}]({url})**")
+            if desc:
+                lines.append(f"   {desc}")
+            idx += 1
+        sections.append("\n".join(lines))
+    if tavily_results:
+        lines = []
+        for r in tavily_results:
+            title = r.get("title") or "Untitled"
+            url = r.get("url", "")
+            if len(url) == 0:
+                continue
+            if url in urls:
+                continue
+            urls.append(url)
+            content = r.get("content", "")
+            lines.append(f"{idx}. **[{title}]({url})**")
+            if content:
+                lines.append(f"   {content}")
+            idx += 1
+        sections.append("\n".join(lines))
+    return "\n\n".join(sections)
+
+
 def format_search_results(results: List[SearchResult]) -> str:
     if not results:
         return "No results found."
