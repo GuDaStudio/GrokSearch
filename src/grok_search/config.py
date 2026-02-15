@@ -92,6 +92,14 @@ class Config:
         return os.getenv("TAVILY_API_KEY")
 
     @property
+    def firecrawl_api_url(self) -> str:
+        return os.getenv("FIRECRAWL_API_URL", "https://api.firecrawl.dev/v2")
+
+    @property
+    def firecrawl_api_key(self) -> str | None:
+        return os.getenv("FIRECRAWL_API_KEY")
+
+    @property
     def log_level(self) -> str:
         return os.getenv("GROK_LOG_LEVEL", "INFO").upper()
 
@@ -158,6 +166,8 @@ class Config:
             "TAVILY_API_URL": self.tavily_api_url,
             "TAVILY_ENABLED": self.tavily_enabled,
             "TAVILY_API_KEY": self._mask_api_key(self.tavily_api_key) if self.tavily_api_key else "未配置",
+            "FIRECRAWL_API_URL": self.firecrawl_api_url,
+            "FIRECRAWL_API_KEY": self._mask_api_key(self.firecrawl_api_key) if self.firecrawl_api_key else "未配置",
             "config_status": config_status
         }
 

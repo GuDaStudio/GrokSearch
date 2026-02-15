@@ -20,13 +20,14 @@ Grok Search MCP 是一个基于 [FastMCP](https://github.com/jlowin/fastmcp) 构
 ```
 Claude ──MCP──► Grok Search Server
                   ├─ web_search  ───► Grok API（AI 搜索）
-                  ├─ web_fetch   ───► Tavily Extract（内容抓取）
+                  ├─ web_fetch   ───► Tavily Extract → Firecrawl Scrape（内容抓取，自动降级）
                   └─ web_map     ───► Tavily Map（站点映射）
 ```
 
 ### 功能特性
 
 - **双引擎**：Grok 搜索 + Tavily 抓取/映射，互补协作
+- **Firecrawl 托底**：Tavily 提取失败时自动降级到 Firecrawl Scrape，支持空内容自动重试
 - **OpenAI 兼容接口**，支持任意 Grok 镜像站
 - **自动时间注入**（检测时间相关查询，注入本地时间上下文）
 - 一键禁用 Claude Code 官方 WebSearch/WebFetch，强制路由到本工具
@@ -101,6 +102,8 @@ claude mcp add-json grok-search --scope user '{
 | `TAVILY_API_KEY` | ❌ | - | Tavily API 密钥（用于 web_fetch / web_map） |
 | `TAVILY_API_URL` | ❌ | `https://api.tavily.com` | Tavily API 地址 |
 | `TAVILY_ENABLED` | ❌ | `true` | 是否启用 Tavily |
+| `FIRECRAWL_API_KEY` | ❌ | - | Firecrawl API 密钥（Tavily 失败时托底） |
+| `FIRECRAWL_API_URL` | ❌ | `https://api.firecrawl.dev/v2` | Firecrawl API 地址 |
 | `GROK_DEBUG` | ❌ | `false` | 调试模式 |
 | `GROK_LOG_LEVEL` | ❌ | `INFO` | 日志级别 |
 | `GROK_LOG_DIR` | ❌ | `logs` | 日志目录 |
@@ -141,7 +144,7 @@ claude mcp list
 
 ### `web_fetch` — 网页内容抓取
 
-通过 Tavily Extract API 获取完整网页内容，返回 Markdown 格式。
+通过 Tavily Extract API 获取完整网页内容，返回 Markdown 格式。Tavily 失败时自动降级到 Firecrawl Scrape 进行托底抓取。
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
@@ -187,7 +190,7 @@ claude mcp list
 <summary>
 Q: 必须同时配置 Grok 和 Tavily 吗？
 </summary>
-A: Grok（`GROK_API_URL` + `GROK_API_KEY`）为必填，提供核心搜索能力。Tavily 为可选，未配置时 `web_fetch` 和 `web_map` 将返回配置错误提示。
+A: Grok（`GROK_API_URL` + `GROK_API_KEY`）为必填，提供核心搜索能力。Tavily 和 Firecrawl 均为可选：配置 Tavily 后 `web_fetch` 优先使用 Tavily Extract，失败时降级到 Firecrawl Scrape；两者均未配置时 `web_fetch` 将返回配置错误提示。`web_map` 依赖 Tavily。
 </details>
 
 <details>

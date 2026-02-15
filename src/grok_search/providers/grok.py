@@ -135,11 +135,7 @@ class GrokSearchProvider(BaseSearchProvider):
         if platform:
             platform_prompt = "\n\nYou should search the web for the information you need, and focus on these platform: " + platform + "\n"
 
-        # 仅在查询包含时间相关关键词时注入当前时间信息
-        if _needs_time_context(query):
-            time_context = get_local_time_info() + "\n"
-        else:
-            time_context = ""
+        time_context = get_local_time_info() + "\n"
 
         payload = {
             "model": self.model,
@@ -148,7 +144,7 @@ class GrokSearchProvider(BaseSearchProvider):
                     "role": "system",
                     "content": search_prompt,
                 },
-                {"role": "user", "content": search_prompt + time_context + query + platform_prompt + "**At the end of the response, summarize and cite sources by listing referenced URLs in the format [brief description](URL), requiring no fewer than 30 verifiable, accessible, and credible sources.**"},
+                {"role": "user", "content": time_context + search_prompt + query + platform_prompt + "**At the end of the response, summarize and cite sources by listing referenced URLs in the format [brief description](URL), requiring no fewer than 10 verifiable, accessible, and credible sources.**"},
             ],
             "stream": True,
         }

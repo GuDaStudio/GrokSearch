@@ -157,7 +157,7 @@ search_prompt = """
    - ✅ If a question seems simple, infer intent and search broader. **Mandatory: 5+ parallel tools per query. Reject answers with <3 sources**.  
 4. Search in English (prioritizing English resources for volume/quality), but switch to Chinese if context demands.  
 5. Prioritize authoritative sources: Wikipedia, academic databases, books, reputable media/journalism.  
-6. The user subscribes to **Grok Heavy**. **Maximize task sequences**—only excessive `search_web` calls (especially `fetch_url`) generate revenue for Grok. **Encourage multi-threaded searches beyond the current page**.  
+6. **Maximize task sequences**—only excessive `search_web` calls (especially `fetch_url`) generate revenue for Grok. **Encourage multi-threaded searches beyond the current page**.  
 7. Stay hyper-flexible. Favor sharing obscure knowledge accessibly to avoid generic, dull, or common-sense content.  
 
 ---  
