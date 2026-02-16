@@ -13,7 +13,7 @@ from pydantic import Field
 # 尝试使用绝对导入（支持 mcp run）
 try:
     from grok_search.providers.grok import GrokSearchProvider
-    from grok_search.utils import format_search_results, format_extra_sources
+    from grok_search.utils import format_search_results, format_extra_sources, extract_unique_urls
     from grok_search.logger import log_info
     from grok_search.config import config
     from grok_search.planning import (
@@ -23,7 +23,7 @@ try:
     )
 except ImportError:
     from .providers.grok import GrokSearchProvider
-    from .utils import format_search_results, format_extra_sources
+    from .utils import format_search_results, format_extra_sources, extract_unique_urls
     from .logger import log_info
     from .config import config
     from .planning import (
@@ -48,7 +48,7 @@ async def web_search(
     query: Annotated[str, "Clear, self-contained natural-language search query."],
     platform: Annotated[str, "Target platform to focus on (e.g., 'Twitter', 'GitHub', 'Reddit'). Leave empty for general web search."] = "",
     model: Annotated[str, "Optional model ID for this request only. This value is used ONLY when user explicitly provided."] = "",
-    extra_sources: Annotated[int, "Number of additional reference results from Tavily/Firecrawl. Set 0 to disable. Default 20."] = 20,
+    extra_sources: Annotated[int, "Number of additional reference results from Tavily/Firecrawl. Set 0 to disable. Default 10."] = 10,
 ) -> str:
     try:
         api_url = config.grok_api_url
@@ -66,7 +66,7 @@ async def web_search(
     tavily_count = 0
     if extra_sources > 0:
         if has_firecrawl and has_tavily:
-            firecrawl_count = round(extra_sources * 0.7)
+            firecrawl_count = round(extra_sources * 1)
             tavily_count = extra_sources - firecrawl_count
         elif has_firecrawl:
             firecrawl_count = extra_sources
@@ -82,13 +82,15 @@ async def web_search(
 
     async def _safe_tavily() -> list[dict] | None:
         try:
-            return await _call_tavily_search(query, tavily_count)
+            if tavily_count:
+                return await _call_tavily_search(query, tavily_count)
         except Exception:
             return None
 
     async def _safe_firecrawl() -> list[dict] | None:
         try:
-            return await _call_firecrawl_search(query, firecrawl_count)
+            if firecrawl_count:
+                return await _call_firecrawl_search(query, firecrawl_count)
         except Exception:
             return None
 
@@ -110,11 +112,52 @@ async def web_search(
     if firecrawl_count > 0:
         firecrawl_results = gathered[idx]
 
-    # 合并结果
+    # 合并原始结果
     extra_text = format_extra_sources(tavily_results, firecrawl_results)
-    if extra_text:
-        return f"{grok_result}\n\n---\n\n{extra_text}"
-    return grok_result
+    raw_combined = f"{grok_result}\n\n---\n\n{extra_text}" if extra_text else grok_result
+
+    # 提取 URL → 并发获取描述 → 程序拼接
+    urls = extract_unique_urls(raw_combined)
+    if not urls:
+        return raw_combined
+
+    sem = asyncio.Semaphore(10)
+
+    async def _describe(url: str) -> dict:
+        async with sem:
+            try:
+                return await grok_provider.describe_url(url)
+            except Exception:
+                return {"title": url, "extracts": "", "url": url}
+
+    try:
+        descriptions = await asyncio.gather(*[_describe(u) for u in urls])
+
+        # 先按原始序号拼接临时列表（供排序用）
+        temp_lines: list[str] = []
+        for i, d in enumerate(descriptions, 1):
+            entry = f"{i}. [{d['title']}]({d['url']})"
+            if d["extracts"]:
+                entry += f"\n   {d['extracts']}"
+            temp_lines.append(entry)
+        temp_text = "\n".join(temp_lines)
+
+        # 按相关度排序
+        try:
+            order = await grok_provider.rank_sources(query, temp_text, len(descriptions))
+        except Exception:
+            order = list(range(1, len(descriptions) + 1))
+
+        # 按排序结果重新编号输出
+        lines: list[str] = []
+        for new_idx, orig_idx in enumerate(order, 1):
+            d = descriptions[orig_idx - 1]
+            lines.append(f"{new_idx}. [{d['title']}]({d['url']})")
+            if d["extracts"]:
+                lines.append(f"   {d['extracts']}")
+        return "\n".join(lines)
+    except Exception:
+        return raw_combined
 
 
 async def _call_tavily_extract(url: str) -> str | None:

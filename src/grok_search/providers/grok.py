@@ -7,7 +7,7 @@ from tenacity import AsyncRetrying, retry_if_exception, stop_after_attempt, wait
 from tenacity.wait import wait_base
 from zoneinfo import ZoneInfo
 from .base import BaseSearchProvider, SearchResult
-from ..utils import search_prompt, fetch_prompt
+from ..utils import search_prompt, fetch_prompt, url_describe_prompt, rank_sources_prompt
 from ..logger import log_info
 from ..config import config
 
@@ -232,3 +232,57 @@ class GrokSearchProvider(BaseSearchProvider):
                     ) as response:
                         response.raise_for_status()
                         return await self._parse_streaming_response(response, ctx)
+
+    async def describe_url(self, url: str, ctx=None) -> dict:
+        """让 Grok 阅读单个 URL 并返回 title + extracts"""
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": url_describe_prompt},
+                {"role": "user", "content": url},
+            ],
+            "stream": True,
+        }
+        result = await self._execute_stream_with_retry(headers, payload, ctx)
+        title, extracts = url, ""
+        for line in result.strip().splitlines():
+            if line.startswith("Title:"):
+                title = line[6:].strip() or url
+            elif line.startswith("Extracts:"):
+                extracts = line[9:].strip()
+        return {"title": title, "extracts": extracts, "url": url}
+
+    async def rank_sources(self, query: str, sources_text: str, total: int, ctx=None) -> list[int]:
+        """让 Grok 按查询相关度对信源排序，返回排序后的序号列表"""
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": rank_sources_prompt},
+                {"role": "user", "content": f"Query: {query}\n\n{sources_text}"},
+            ],
+            "stream": True,
+        }
+        result = await self._execute_stream_with_retry(headers, payload, ctx)
+        order: list[int] = []
+        seen: set[int] = set()
+        for token in result.strip().split():
+            try:
+                n = int(token)
+                if 1 <= n <= total and n not in seen:
+                    seen.add(n)
+                    order.append(n)
+            except ValueError:
+                continue
+        # 补齐遗漏的序号
+        for i in range(1, total + 1):
+            if i not in seen:
+                order.append(i)
+        return order

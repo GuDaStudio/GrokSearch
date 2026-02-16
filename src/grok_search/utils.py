@@ -1,5 +1,20 @@
 from typing import List
+import re
 from .providers.base import SearchResult
+
+_URL_PATTERN = re.compile(r'https?://[^\s<>"\'`，。、；：！？》）】\)]+')
+
+
+def extract_unique_urls(text: str) -> list[str]:
+    """从文本中提取所有唯一 URL，按首次出现顺序排列"""
+    seen: set[str] = set()
+    urls: list[str] = []
+    for m in _URL_PATTERN.finditer(text):
+        url = m.group().rstrip('.,;:!?')
+        if url not in seen:
+            seen.add(url)
+            urls.append(url)
+    return urls
 
 
 def format_extra_sources(tavily_results: list[dict] | None, firecrawl_results: list[dict] | None) -> str:
@@ -170,6 +185,26 @@ fetch_prompt = """
 2. 返回完整的结构化 Markdown 文档
 """
 
+
+url_describe_prompt = (
+    "Browse the given URL. Return exactly two sections:\n\n"
+    "Title: <page title from the page's own <title> tag or top heading; "
+    "if missing/generic, craft one using key terms found in the page>\n\n"
+    "Extracts: <copy 2-4 verbatim fragments from the page that best represent "
+    "its core content. Each fragment must be the author's original words, "
+    "wrapped in quotes, separated by ' | '. "
+    "Do NOT paraphrase, rephrase, interpret, or describe. "
+    "Do NOT write sentences like 'This page discusses...' or 'The author argues...'. "
+    "You are a copy-paste machine.>\n\n"
+    "Nothing else."
+)
+
+rank_sources_prompt = (
+    "Given a user query and a numbered source list, output ONLY the source numbers "
+    "reordered by relevance to the query (most relevant first). "
+    "Format: space-separated integers on a single line (e.g., 14 12 1 3 5). "
+    "Include every number exactly once. Nothing else."
+)
 
 search_prompt = """
 # Core Instruction  
