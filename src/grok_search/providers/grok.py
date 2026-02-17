@@ -144,7 +144,7 @@ class GrokSearchProvider(BaseSearchProvider):
                     "role": "system",
                     "content": search_prompt,
                 },
-                {"role": "user", "content": time_context + search_prompt + query + platform_prompt + "**At the end of the response, summarize and cite sources by listing referenced URLs in the format [brief description](URL), requiring no fewer than 10 verifiable, accessible, and credible sources.**"},
+                {"role": "user", "content": time_context + search_prompt + query + platform_prompt},
             ],
             "stream": True,
         }
