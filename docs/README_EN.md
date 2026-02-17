@@ -129,18 +129,40 @@ This will automatically modify the **project-level** `.claude/settings.json` `pe
 ## 3. MCP Tools
 
 <details>
-<summary>This project provides six MCP tools (click to expand)</summary>
+<summary>This project provides eight MCP tools (click to expand)</summary>
 
 ### `web_search` — AI Web Search
 
-Executes AI-driven web search via Grok API, returning structured results.
+Executes AI-driven web search via Grok API. By default it returns only Grok's answer and a `session_id` for retrieving sources later.
+
+`web_search` does not expand sources in the response; it only returns `sources_count`. Sources are cached server-side by `session_id` and can be fetched with `get_sources`.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `query` | string | Yes | - | Search query |
+| `platform` | string | No | `""` | Focus platform (e.g., `"Twitter"`, `"GitHub, Reddit"`) |
+| `model` | string | No | `null` | Per-request Grok model ID |
+| `extra_sources` | int | No | `0` | Extra sources via Tavily/Firecrawl (0 disables) |
+
+Automatically detects time-related keywords in queries (e.g., "latest", "today", "recent"), injecting local time context to improve accuracy for time-sensitive searches.
+
+Return value (structured dict):
+- `session_id`: search session ID
+- `content`: answer only (sources removed)
+- `sources_count`: cached sources count
+
+### `get_sources` — Retrieve Sources
+
+Retrieves the full cached source list for a previous `web_search` call.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `query` | string | Yes | Search query |
-| `platform` | string | No | Focus platform (e.g., `"Twitter"`, `"GitHub, Reddit"`) |
+| `session_id` | string | Yes | `session_id` returned by `web_search` |
 
-Automatically detects time-related keywords in queries (e.g., "latest", "today", "recent"), injecting local time context to improve accuracy for time-sensitive searches.
+Return value (structured dict):
+- `session_id`
+- `sources_count`
+- `sources`: source list (each item includes `url`, may include `title`/`description`/`provider`)
 
 ### `web_fetch` — Web Content Extraction
 
@@ -182,6 +204,10 @@ Settings persist to `~/.config/grok-search/config.json` across sessions.
 | `action` | string | No | `"status"` | `"on"` disable built-in tools / `"off"` enable built-in tools / `"status"` check status |
 
 Modifies project-level `.claude/settings.json` `permissions.deny` to disable Claude Code's built-in WebSearch and WebFetch.
+
+### `search_planning` — Search Planning
+
+A structured multi-phase planning scaffold to generate an executable search plan before running complex searches.
 </details>
 
 ## 4. FAQ

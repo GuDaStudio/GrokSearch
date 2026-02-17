@@ -13,9 +13,9 @@ from pydantic import Field
 # 尝试使用绝对导入（支持 mcp run）
 try:
     from grok_search.providers.grok import GrokSearchProvider
-    from grok_search.utils import format_search_results, format_extra_sources, extract_unique_urls
     from grok_search.logger import log_info
     from grok_search.config import config
+    from grok_search.sources import SourcesCache, merge_sources, new_session_id, split_answer_and_sources
     from grok_search.planning import (
         IntentOutput, ComplexityOutput, SubQuery,
         StrategyOutput, ToolPlanItem, ExecutionOrderOutput,
@@ -23,9 +23,9 @@ try:
     )
 except ImportError:
     from .providers.grok import GrokSearchProvider
-    from .utils import format_search_results, format_extra_sources, extract_unique_urls
     from .logger import log_info
     from .config import config
+    from .sources import SourcesCache, merge_sources, new_session_id, split_answer_and_sources
     from .planning import (
         IntentOutput, ComplexityOutput, SubQuery,
         StrategyOutput, ToolPlanItem, ExecutionOrderOutput,
@@ -36,27 +36,124 @@ import asyncio
 
 mcp = FastMCP("grok-search")
 
+_SOURCES_CACHE = SourcesCache(max_size=256)
+_AVAILABLE_MODELS_CACHE: dict[tuple[str, str], list[str]] = {}
+_AVAILABLE_MODELS_LOCK = asyncio.Lock()
+
+
+async def _fetch_available_models(api_url: str, api_key: str) -> list[str]:
+    import httpx
+
+    models_url = f"{api_url.rstrip('/')}/models"
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        response = await client.get(
+            models_url,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+        )
+        response.raise_for_status()
+        data = response.json()
+
+    models: list[str] = []
+    for item in (data or {}).get("data", []) or []:
+        if isinstance(item, dict) and isinstance(item.get("id"), str):
+            models.append(item["id"])
+    return models
+
+
+async def _get_available_models_cached(api_url: str, api_key: str) -> list[str]:
+    key = (api_url, api_key)
+    async with _AVAILABLE_MODELS_LOCK:
+        if key in _AVAILABLE_MODELS_CACHE:
+            return _AVAILABLE_MODELS_CACHE[key]
+
+    try:
+        models = await _fetch_available_models(api_url, api_key)
+    except Exception:
+        models = []
+
+    async with _AVAILABLE_MODELS_LOCK:
+        _AVAILABLE_MODELS_CACHE[key] = models
+    return models
+
+
+def _extra_results_to_sources(
+    tavily_results: list[dict] | None,
+    firecrawl_results: list[dict] | None,
+) -> list[dict]:
+    sources: list[dict] = []
+    seen: set[str] = set()
+
+    if firecrawl_results:
+        for r in firecrawl_results:
+            url = (r.get("url") or "").strip()
+            if not url or url in seen:
+                continue
+            seen.add(url)
+            item: dict = {"url": url, "provider": "firecrawl"}
+            title = (r.get("title") or "").strip()
+            if title:
+                item["title"] = title
+            desc = (r.get("description") or "").strip()
+            if desc:
+                item["description"] = desc
+            sources.append(item)
+
+    if tavily_results:
+        for r in tavily_results:
+            url = (r.get("url") or "").strip()
+            if not url or url in seen:
+                continue
+            seen.add(url)
+            item: dict = {"url": url, "provider": "tavily"}
+            title = (r.get("title") or "").strip()
+            if title:
+                item["title"] = title
+            content = (r.get("content") or "").strip()
+            if content:
+                item["description"] = content
+            sources.append(item)
+
+    return sources
+
+
 @mcp.tool(
     name="web_search",
     description="""
     Before using this tool, please use the search_planning tool to plan the search carefully.
-    Performs a deep web search based on the given query and returns the results as a JSON string.
+    Performs a deep web search based on the given query and returns Grok's answer directly.
+
+    This tool extracts sources if provided by upstream, caches them, and returns:
+    - session_id: string (When you feel confused or curious about the main content, use this field to invoke the get_sources tool to obtain the corresponding list of information sources)
+    - content: string (answer only)
+    - sources_count: int
     """,
-    meta={"version": "1.4.0", "author": "guda.studio"},
+    meta={"version": "2.0.0", "author": "guda.studio"},
 )
 async def web_search(
     query: Annotated[str, "Clear, self-contained natural-language search query."],
     platform: Annotated[str, "Target platform to focus on (e.g., 'Twitter', 'GitHub', 'Reddit'). Leave empty for general web search."] = "",
     model: Annotated[str, "Optional model ID for this request only. This value is used ONLY when user explicitly provided."] = "",
-    extra_sources: Annotated[int, "Number of additional reference results from Tavily/Firecrawl. Set 0 to disable. Default 10."] = 10,
-) -> str:
+    extra_sources: Annotated[int, "Number of additional reference results from Tavily/Firecrawl. Set 0 to disable. Default 0."] = 0,
+) -> dict:
+    session_id = new_session_id()
     try:
         api_url = config.grok_api_url
         api_key = config.grok_api_key
     except ValueError as e:
-        return f"配置错误: {str(e)}"
+        await _SOURCES_CACHE.set(session_id, [])
+        return {"session_id": session_id, "content": f"配置错误: {str(e)}", "sources_count": 0}
 
-    effective_model = model if model != "" else config.grok_model
+    effective_model = config.grok_model
+    if model:
+        available = await _get_available_models_cached(api_url, api_key)
+        if available and model not in available:
+            await _SOURCES_CACHE.set(session_id, [])
+            return {"session_id": session_id, "content": f"无效模型: {model}", "sources_count": 0}
+        effective_model = model
+
     grok_provider = GrokSearchProvider(api_url, api_key, effective_model)
 
     # 计算额外信源配额
@@ -102,7 +199,7 @@ async def web_search(
 
     gathered = await asyncio.gather(*coros)
 
-    grok_result: str = gathered[0]
+    grok_result: str = gathered[0] or ""
     tavily_results: list[dict] | None = None
     firecrawl_results: list[dict] | None = None
     idx = 1
@@ -112,52 +209,35 @@ async def web_search(
     if firecrawl_count > 0:
         firecrawl_results = gathered[idx]
 
-    # 合并原始结果
-    extra_text = format_extra_sources(tavily_results, firecrawl_results)
-    raw_combined = f"{grok_result}\n\n---\n\n{extra_text}" if extra_text else grok_result
+    answer, grok_sources = split_answer_and_sources(grok_result)
+    extra = _extra_results_to_sources(tavily_results, firecrawl_results)
+    all_sources = merge_sources(grok_sources, extra)
 
-    # 提取 URL → 并发获取描述 → 程序拼接
-    urls = extract_unique_urls(raw_combined)
-    if not urls:
-        return raw_combined
+    await _SOURCES_CACHE.set(session_id, all_sources)
+    return {"session_id": session_id, "content": answer, "sources_count": len(all_sources)}
 
-    sem = asyncio.Semaphore(10)
 
-    async def _describe(url: str) -> dict:
-        async with sem:
-            try:
-                return await grok_provider.describe_url(url)
-            except Exception:
-                return {"title": url, "extracts": "", "url": url}
-
-    try:
-        descriptions = await asyncio.gather(*[_describe(u) for u in urls])
-
-        # 先按原始序号拼接临时列表（供排序用）
-        temp_lines: list[str] = []
-        for i, d in enumerate(descriptions, 1):
-            entry = f"{i}. [{d['title']}]({d['url']})"
-            if d["extracts"]:
-                entry += f"\n   {d['extracts']}"
-            temp_lines.append(entry)
-        temp_text = "\n".join(temp_lines)
-
-        # 按相关度排序
-        try:
-            order = await grok_provider.rank_sources(query, temp_text, len(descriptions))
-        except Exception:
-            order = list(range(1, len(descriptions) + 1))
-
-        # 按排序结果重新编号输出
-        lines: list[str] = []
-        for new_idx, orig_idx in enumerate(order, 1):
-            d = descriptions[orig_idx - 1]
-            lines.append(f"{new_idx}. [{d['title']}]({d['url']})")
-            if d["extracts"]:
-                lines.append(f"   {d['extracts']}")
-        return "\n".join(lines)
-    except Exception:
-        return raw_combined
+@mcp.tool(
+    name="get_sources",
+    description="""
+    When you feel confused or curious about the search response content, use the session_id returned by web_search to invoke the this tool to obtain the corresponding list of information sources.
+    Retrieve all cached sources for a previous web_search call.
+    Provide the session_id returned by web_search to get the full source list.
+    """,
+    meta={"version": "1.0.0", "author": "guda.studio"},
+)
+async def get_sources(
+    session_id: Annotated[str, "Session ID from previous web_search call."]
+) -> dict:
+    sources = await _SOURCES_CACHE.get(session_id)
+    if sources is None:
+        return {
+            "session_id": session_id,
+            "sources": [],
+            "sources_count": 0,
+            "error": "session_id_not_found_or_expired",
+        }
+    return {"session_id": session_id, "sources": sources, "sources_count": len(sources)}
 
 
 async def _call_tavily_extract(url: str) -> str | None:

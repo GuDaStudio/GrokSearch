@@ -23,7 +23,11 @@ class Config:
     def config_file(self) -> Path:
         if self._config_file is None:
             config_dir = Path.home() / ".config" / "grok-search"
-            config_dir.mkdir(parents=True, exist_ok=True)
+            try:
+                config_dir.mkdir(parents=True, exist_ok=True)
+            except OSError:
+                config_dir = Path.cwd() / ".grok-search"
+                config_dir.mkdir(parents=True, exist_ok=True)
             self._config_file = config_dir / "config.json"
         return self._config_file
 
@@ -106,11 +110,27 @@ class Config:
     @property
     def log_dir(self) -> Path:
         log_dir_str = os.getenv("GROK_LOG_DIR", "logs")
-        if Path(log_dir_str).is_absolute():
-            return Path(log_dir_str)
-        user_log_dir = Path.home() / ".config" / "grok-search" / log_dir_str
-        user_log_dir.mkdir(parents=True, exist_ok=True)
-        return user_log_dir
+        log_dir = Path(log_dir_str)
+        if log_dir.is_absolute():
+            return log_dir
+
+        home_log_dir = Path.home() / ".config" / "grok-search" / log_dir_str
+        try:
+            home_log_dir.mkdir(parents=True, exist_ok=True)
+            return home_log_dir
+        except OSError:
+            pass
+
+        cwd_log_dir = Path.cwd() / log_dir_str
+        try:
+            cwd_log_dir.mkdir(parents=True, exist_ok=True)
+            return cwd_log_dir
+        except OSError:
+            pass
+
+        tmp_log_dir = Path("/tmp") / "grok-search" / log_dir_str
+        tmp_log_dir.mkdir(parents=True, exist_ok=True)
+        return tmp_log_dir
 
     @property
     def grok_model(self) -> str:

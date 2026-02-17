@@ -129,18 +129,40 @@ claude mcp list
 ## 三、MCP 工具介绍
 
 <details>
-<summary>本项目提供六个 MCP 工具（展开查看）</summary>
+<summary>本项目提供八个 MCP 工具（展开查看）</summary>
 
 ### `web_search` — AI 网络搜索
 
-通过 Grok API 执行 AI 驱动的网络搜索，返回结构化结果。
+通过 Grok API 执行 AI 驱动的网络搜索，默认仅返回 Grok 的回答正文，并返回 `session_id` 以便后续获取信源。
+
+`web_search` 输出不展开信源，仅返回 `sources_count`；信源会按 `session_id` 缓存在服务端，可用 `get_sources` 拉取。
+
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| `query` | string | ✅ | - | 搜索查询语句 |
+| `platform` | string | ❌ | `""` | 聚焦平台（如 `"Twitter"`, `"GitHub, Reddit"`） |
+| `model` | string | ❌ | `null` | 按次指定 Grok 模型 ID |
+| `extra_sources` | int | ❌ | `0` | 额外补充信源数量（Tavily/Firecrawl，可为 0 关闭） |
+
+自动检测查询中的时间相关关键词（如"最新""今天""recent"等），注入本地时间上下文以提升时效性搜索的准确度。
+
+返回值（结构化字典）：
+- `session_id`: 本次查询的会话 ID
+- `content`: Grok 回答正文（已自动剥离信源）
+- `sources_count`: 已缓存的信源数量
+
+### `get_sources` — 获取信源
+
+通过 `session_id` 获取对应 `web_search` 的全部信源。
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `query` | string | ✅ | 搜索查询语句 |
-| `platform` | string | ❌ | 聚焦平台（如 `"Twitter"`, `"GitHub, Reddit"`） |
+| `session_id` | string | ✅ | `web_search` 返回的 `session_id` |
 
-自动检测查询中的时间相关关键词（如"最新""今天""recent"等），注入本地时间上下文以提升时效性搜索的准确度。
+返回值（结构化字典）：
+- `session_id`
+- `sources_count`
+- `sources`: 信源列表（每项包含 `url`，可能包含 `title`/`description`/`provider`）
 
 ### `web_fetch` — 网页内容抓取
 
@@ -182,6 +204,10 @@ claude mcp list
 | `action` | string | ❌ | `"status"` | `"on"` 禁用官方工具 / `"off"` 启用官方工具 / `"status"` 查看状态 |
 
 修改项目级 `.claude/settings.json` 的 `permissions.deny`，一键禁用 Claude Code 官方的 WebSearch 和 WebFetch。
+
+### `search_planning` — 搜索规划
+
+结构化搜索规划脚手架（分阶段、多轮），用于在执行复杂搜索前先生成可执行的搜索计划。
 </details>
 
 ## 四、常见问题

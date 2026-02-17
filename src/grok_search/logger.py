@@ -3,23 +3,25 @@ from datetime import datetime
 from pathlib import Path
 from .config import config
 
-LOG_DIR = config.log_dir
-LOG_DIR.mkdir(parents=True, exist_ok=True)
-LOG_FILE = LOG_DIR / f"grok_search_{datetime.now().strftime('%Y%m%d')}.log"
-
 logger = logging.getLogger("grok_search")
-logger.setLevel(getattr(logging, config.log_level))
+logger.setLevel(getattr(logging, config.log_level, logging.INFO))
 
-file_handler = logging.FileHandler(LOG_FILE, encoding='utf-8')
-file_handler.setLevel(getattr(logging, config.log_level))
-
-formatter = logging.Formatter(
+_formatter = logging.Formatter(
     '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S'
 )
-file_handler.setFormatter(formatter)
 
-logger.addHandler(file_handler)
+try:
+    log_dir = config.log_dir
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / f"grok_search_{datetime.now().strftime('%Y%m%d')}.log"
+
+    file_handler = logging.FileHandler(log_file, encoding='utf-8')
+    file_handler.setLevel(getattr(logging, config.log_level, logging.INFO))
+    file_handler.setFormatter(_formatter)
+    logger.addHandler(file_handler)
+except OSError:
+    logger.addHandler(logging.NullHandler())
 
 async def log_info(ctx, message: str, is_debug: bool = False):
     if is_debug:
