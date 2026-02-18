@@ -49,6 +49,8 @@ Grok Search MCP 是一个基于 [FastMCP](https://github.com/jlowin/fastmcp) 构
 - ✅ 动态模型切换（支持切换不同 Grok 模型并持久化保存）
 - ✅ **工具路由控制（一键禁用官方 WebSearch/WebFetch，强制使用 GrokSearch）**
 - ✅ **自动时间注入（搜索时自动获取本地时间，确保时间相关查询的准确性）**
+- ✅ **多平台支持（自动检测 xAI 官方 / OpenRouter / 通用 OpenAI 兼容平台）**
+- ✅ **OpenRouter 自动补全 `:online` 后缀，无需手动配置**
 - ✅ 可扩展架构，支持添加其他搜索 Provider
 </details>
 
@@ -92,7 +94,7 @@ wget -qO- https://astral.sh/uv/install.sh | sh
 ### Step 1. 安装 Grok Search MCP 
 
 使用 `claude mcp add-json` 一键安装并配置：
-**注意：**  需要替换 **GROK_API_URL** 以及 **GROK_API_KEY**这两个字段为你自己的站点以及密钥，目前只支持openai格式，所以如果需要使用grok，也需要使用转为openai格式的grok镜像站
+**注意：** 需要替换 **GROK_API_URL**、**GROK_API_KEY** 以及可选的 **GROK_MODEL** 字段。支持 xAI 官方 API、OpenRouter 以及其他 OpenAI 兼容平台。OpenRouter 用户无需手动添加 `:online` 后缀，系统会自动补全。
 
 ```bash
 claude mcp add-json grok-search --scope user '{
@@ -104,8 +106,9 @@ claude mcp add-json grok-search --scope user '{
     "grok-search"
   ],
   "env": {
-    "GROK_API_URL": "https://your-api-endpoint.com/v1",
-    "GROK_API_KEY": "your-api-key-here"
+    "GROK_API_URL": "https://openrouter.ai/api/v1",
+    "GROK_API_KEY": "your-api-key-here",
+    "GROK_MODEL": "x-ai/grok-4-fast"
   }
 }'
 ```
@@ -143,7 +146,52 @@ claude mcp list
 - API Key 是否有效
 - 网络连接是否正常
 
-### Step 3. 配置系统提示词
+### Step 3. 多平台支持
+
+Grok Search MCP 支持多种 API 平台，根据 `GROK_API_URL` 自动检测：
+
+| 平台 | URL 特征 | 搜索能力 | 配置示例 |
+|------|---------|---------|---------|
+| **OpenRouter** | `openrouter.ai` | ✅ 原生实时搜索（自动补全 `:online`） | `GROK_MODEL=x-ai/grok-4-fast` |
+| **xAI 官方** | `api.x.ai` | ✅ 原生实时搜索（规划中） | `GROK_MODEL=grok-4-fast` |
+| **通用平台** | 其他 URL | ⚠️ 基于 Prompt 的搜索 | `GROK_MODEL=grok-4-fast` |
+
+#### OpenRouter 用户（推荐）
+
+使用 OpenRouter 时，系统会**自动为模型名添加 `:online` 后缀**以启用原生实时网络搜索，无需手动配置：
+
+```bash
+claude mcp add-json grok-search --scope user '{
+  "type": "stdio",
+  "command": "uvx",
+  "args": [
+    "--from",
+    "git+https://github.com/GuDaStudio/GrokSearch",
+    "grok-search"
+  ],
+  "env": {
+    "GROK_API_URL": "https://openrouter.ai/api/v1",
+    "GROK_API_KEY": "sk-or-v1-xxx",
+    "GROK_MODEL": "x-ai/grok-4-fast"
+  }
+}'
+```
+
+> **💡 提示**：当检测到 OpenRouter 平台时，系统会自动为模型名追加 `:online` 后缀（如 `x-ai/grok-4-fast` → `x-ai/grok-4-fast:online`），启用 xAI 的原生 Web Search + X Search 能力。搜索结果附带真实来源引用。
+
+#### 环境变量说明
+
+| 环境变量 | 必填 | 默认值 | 说明 |
+|---------|------|--------|------|
+| `GROK_API_URL` | ✅ | - | API 端点 URL |
+| `GROK_API_KEY` | ✅ | - | API 密钥 |
+| `GROK_MODEL` | ❌ | `grok-4-fast` | 模型 ID（OpenRouter 下自动补全 `:online` 后缀） |
+| `GROK_PROVIDER` | ❌ | 自动检测 | 手动指定平台类型：`xai` / `openrouter` / `generic` |
+| `GROK_DEBUG` | ❌ | `false` | 启用调试模式 |
+| `GROK_LOG_LEVEL` | ❌ | `INFO` | 日志级别 |
+| `GROK_LOG_DIR` | ❌ | `logs` | 日志目录 |
+
+### Step 4. 配置系统提示词
 为了更好的使用Grok Search 可以通过配置Claude Code或者类似的系统提示词来对整体Vibe Coding Cli进行优化，以Claude Code 为例可以编辑 ~/.claude/CLAUDE.md中追加下面内容，提供了两版使用详细版更能激活工具的能力：
 
 **💡 提示**：现在可以使用 `toggle_builtin_tools` 工具一键禁用官方 WebSearch/WebFetch，强制路由到 GrokSearch！
@@ -464,6 +512,15 @@ A: 注册第三方平台 → 获取 API Endpoint 和 Key → 使用 `claude mcp 
 
 **Q: 配置后如何验证？**
 A: 在 Claude 对话中说"显示 grok-search 配置信息"，查看连接测试结果
+
+**Q: 使用 OpenRouter 时搜索结果不准确？**
+A: 系统会自动为 OpenRouter 模型添加 `:online` 后缀以启用实时搜索。如果仍有问题，请使用 `get_config_info` 工具检查实际使用的模型名是否包含 `:online`。
+
+**Q: 支持哪些 API 平台？**
+A: 支持所有 OpenAI 兼容格式的 API 平台。推荐使用 OpenRouter（自动启用原生搜索）或 xAI 官方 API。代码会根据 `GROK_API_URL` 自动检测平台类型。
+
+**Q: `:online` 后缀是什么？**
+A: 这是 OpenRouter 特有的模型变体后缀，会自动启用该模型的实时网络搜索能力。对于 xAI 模型，会同时启用 Web Search 和 X (Twitter) Search。使用 OpenRouter 时系统会自动补全此后缀，无需手动添加。
 
 ## 许可证
 

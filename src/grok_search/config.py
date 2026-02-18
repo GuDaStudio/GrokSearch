@@ -2,15 +2,18 @@ import os
 import json
 from pathlib import Path
 
+
 class Config:
     _instance = None
     _SETUP_COMMAND = (
-        'claude mcp add-json grok-search --scope user '
+        "claude mcp add-json grok-search --scope user "
         '\'{"type":"stdio","command":"uvx","args":["--from",'
         '"git+https://github.com/GuDaStudio/GrokSearch","grok-search"],'
         '"env":{"GROK_API_URL":"your-api-url","GROK_API_KEY":"your-api-key"}}\''
     )
     _DEFAULT_MODEL = "grok-4-fast"
+    _ONLINE_PROVIDERS = ("openrouter.ai",)
+    _XAI_PROVIDERS = ("api.x.ai",)
 
     def __new__(cls):
         if cls._instance is None:
@@ -31,14 +34,14 @@ class Config:
         if not self.config_file.exists():
             return {}
         try:
-            with open(self.config_file, 'r', encoding='utf-8') as f:
+            with open(self.config_file, "r", encoding="utf-8") as f:
                 return json.load(f)
         except (json.JSONDecodeError, IOError):
             return {}
 
     def _save_config_file(self, config_data: dict) -> None:
         try:
-            with open(self.config_file, 'w', encoding='utf-8') as f:
+            with open(self.config_file, "w", encoding="utf-8") as f:
                 json.dump(config_data, f, ensure_ascii=False, indent=2)
         except IOError as e:
             raise ValueError(f"无法保存配置文件: {str(e)}")
@@ -102,23 +105,53 @@ class Config:
 
     @property
     def grok_model(self) -> str:
-        if self._cached_model is not None:
-            return self._cached_model
+        # 优先级：环境变量 > 配置文件 > 默认值
+        env_model = os.getenv("GROK_MODEL")
+        if env_model:
+            model = env_model
+        elif self._cached_model is not None:
+            model = self._cached_model
+        else:
+            config_data = self._load_config_file()
+            file_model = config_data.get("model")
+            if file_model:
+                self._cached_model = file_model
+                model = file_model
+            else:
+                self._cached_model = self._DEFAULT_MODEL
+                model = self._DEFAULT_MODEL
 
-        config_data = self._load_config_file()
-        file_model = config_data.get("model")
-        if file_model:
-            self._cached_model = file_model
-            return file_model
+        # OpenRouter 需要 :online 后缀才能启用联网搜索，自动补全
+        if self.provider_type == "openrouter" and ":online" not in model:
+            model = f"{model}:online"
 
-        self._cached_model = self._DEFAULT_MODEL
-        return self._DEFAULT_MODEL
+        return model
 
     def set_model(self, model: str) -> None:
         config_data = self._load_config_file()
         config_data["model"] = model
         self._save_config_file(config_data)
         self._cached_model = model
+
+    @property
+    def provider_type(self) -> str:
+        """检测当前使用的 provider 类型: 'xai', 'openrouter', 'generic'"""
+        override = os.getenv("GROK_PROVIDER", "").lower().strip()
+        if override in ("xai", "openrouter", "generic"):
+            return override
+
+        try:
+            url = self.grok_api_url.lower()
+        except ValueError:
+            return "generic"
+
+        for domain in self._XAI_PROVIDERS:
+            if domain in url:
+                return "xai"
+        for domain in self._ONLINE_PROVIDERS:
+            if domain in url:
+                return "openrouter"
+        return "generic"
 
     @staticmethod
     def _mask_api_key(key: str) -> str:
@@ -143,12 +176,16 @@ class Config:
             "GROK_API_URL": api_url,
             "GROK_API_KEY": api_key_masked,
             "GROK_MODEL": self.grok_model,
+            "GROK_PROVIDER": self.provider_type,
             "GROK_DEBUG": self.debug_enabled,
             "GROK_LOG_LEVEL": self.log_level,
             "GROK_LOG_DIR": str(self.log_dir),
             "TAVILY_ENABLED": self.tavily_enabled,
-            "TAVILY_API_KEY": self._mask_api_key(self.tavily_api_key) if self.tavily_api_key else "未配置",
-            "config_status": config_status
+            "TAVILY_API_KEY": self._mask_api_key(self.tavily_api_key)
+            if self.tavily_api_key
+            else "未配置",
+            "config_status": config_status,
         }
+
 
 config = Config()
