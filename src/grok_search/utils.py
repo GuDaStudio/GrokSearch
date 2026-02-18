@@ -9,22 +9,23 @@ def format_search_results(results: List[SearchResult]) -> str:
     formatted = []
     for i, result in enumerate(results, 1):
         parts = [f"## Result {i}: {result.title}"]
-        
+
         if result.url:
             parts.append(f"**URL:** {result.url}")
-        
+
         if result.snippet:
             parts.append(f"**Summary:** {result.snippet}")
-        
+
         if result.source:
             parts.append(f"**Source:** {result.source}")
-        
+
         if result.published_date:
             parts.append(f"**Published:** {result.published_date}")
-        
+
         formatted.append("\n".join(parts))
 
     return "\n\n---\n\n".join(formatted)
+
 
 fetch_prompt = """
 # Profile: Web Content Fetcher
