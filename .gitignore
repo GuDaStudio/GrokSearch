@@ -17,6 +17,7 @@ logs/
 
 # Test outputs
 test_output.*
+test_cqnu*
 test_cqnu.py
 test_followup.py
 

@@ -179,7 +179,7 @@ async def web_search(
                 "conversation_id": conversation_id,
                 "content": "会话已过期或不存在，请不带 follow_up 开始新搜索。",
                 "sources_count": 0,
-                "follow_up": False,
+                "can_follow_up": False,
             }
         history = conv_session.get_history()
     else:
@@ -257,7 +257,7 @@ async def web_search(
         "conversation_id": conversation_id,
         "content": answer,
         "sources_count": len(all_sources),
-        "follow_up": True,
+        "can_follow_up": True,
         "search_count": conv_session.search_count,
     }
 
