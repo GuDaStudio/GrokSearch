@@ -110,6 +110,9 @@ claude mcp add-json grok-search --scope user '{
 | `GROK_RETRY_MAX_ATTEMPTS` | ❌ | `3` | 最大重试次数 |
 | `GROK_RETRY_MULTIPLIER` | ❌ | `1` | 重试退避乘数 |
 | `GROK_RETRY_MAX_WAIT` | ❌ | `10` | 重试最大等待秒数 |
+| `GROK_SESSION_TIMEOUT` | ❌ | `600` | 追问会话超时秒数（默认 10 分钟） |
+| `GROK_MAX_SESSIONS` | ❌ | `20` | 最大并发会话数 |
+| `GROK_MAX_SEARCHES` | ❌ | `50` | 单会话最大搜索次数 |
 
 
 ### 验证安装
@@ -133,23 +136,44 @@ claude mcp list
 
 ### `web_search` — AI 网络搜索
 
-通过 Grok API 执行 AI 驱动的网络搜索，默认仅返回 Grok 的回答正文，并返回 `session_id` 以便后续获取信源。
-
-`web_search` 输出不展开信源，仅返回 `sources_count`；信源会按 `session_id` 缓存在服务端，可用 `get_sources` 拉取。
+通过 Grok API 执行 AI 驱动的网络搜索，返回 Grok 的回答正文。支持**多轮追问**——首次搜索返回 `conversation_id`，后续搜索传入该 ID 即可在同一上下文中追问。
 
 | 参数 | 类型 | 必填 | 默认值 | 说明 |
 |------|------|------|--------|------|
 | `query` | string | ✅ | - | 搜索查询语句 |
+| `follow_up` | bool | ❌ | `false` | 设为 `true` 继续追问（需提供 `conversation_id`） |
+| `conversation_id` | string | ❌ | `""` | 上一次搜索返回的会话 ID |
 | `platform` | string | ❌ | `""` | 聚焦平台（如 `"Twitter"`, `"GitHub, Reddit"`） |
 | `model` | string | ❌ | `null` | 按次指定 Grok 模型 ID |
-| `extra_sources` | int | ❌ | `0` | 额外补充信源数量（Tavily/Firecrawl，可为 0 关闭） |
+| `extra_sources` | int | ❌ | `0` | 额外补充信源数量（Tavily/Firecrawl） |
 
-自动检测查询中的时间相关关键词（如"最新""今天""recent"等），注入本地时间上下文以提升时效性搜索的准确度。
+自动检测查询中的时间相关关键词（如"最新""今天""recent"等），按需注入本地时间上下文。
 
-返回值（结构化字典）：
-- `session_id`: 本次查询的会话 ID
-- `content`: Grok 回答正文（已自动剥离信源）
-- `sources_count`: 已缓存的信源数量
+返回值（`dict`）：
+
+```json
+{
+  "session_id": "8236bf0b6a79",
+  "conversation_id": "0fe631c32397",
+  "content": "Grok 回答正文...",
+  "sources_count": 3,
+  "can_follow_up": true,
+  "search_count": 1
+}
+```
+
+| 字段 | 说明 |
+|------|------|
+| `session_id` | 本次查询的信源缓存 ID（用于 `get_sources`） |
+| `conversation_id` | 会话 ID（用于后续 `follow_up` 追问） |
+| `content` | Grok 回答正文（已自动剥离信源标记） |
+| `sources_count` | 已缓存的信源数量（Grok 内置 + 额外 Tavily/Firecrawl） |
+| `can_follow_up` | 是否可以继续追问（`false` 表示会话已过期） |
+| `search_count` | 当前会话中的累计搜索次数 |
+
+> **追问使用方式**：首次搜索不传 `follow_up`/`conversation_id` → 记录返回的 `conversation_id` → 追问时设 `follow_up=true` 并传入该 ID。会话默认 10 分钟超时（可通过 `GROK_SESSION_TIMEOUT` 配置）。
+
+> **关于信源**：`sources_count` 可能为 0——Grok 搜索的信源以 `[^1]` 脚注形式内嵌在 `content` 文本中，而非结构化 URL。如需可点击的来源链接，请设置 `extra_sources > 0`（会调用 Tavily/Firecrawl 补充结构化信源）。
 
 ### `get_sources` — 获取信源
 
@@ -159,18 +183,34 @@ claude mcp list
 |------|------|------|------|
 | `session_id` | string | ✅ | `web_search` 返回的 `session_id` |
 
-返回值（结构化字典）：
-- `session_id`
-- `sources_count`
-- `sources`: 信源列表（每项包含 `url`，可能包含 `title`/`description`/`provider`）
+返回值（`dict`）：
+
+```json
+{
+  "session_id": "54e67e288b2b",
+  "sources": [
+    {
+      "url": "https://realpython.com/async-io-python/",
+      "provider": "tavily",
+      "title": "Python's asyncio: A Hands-On Walkthrough",
+      "description": "..."
+    }
+  ],
+  "sources_count": 3
+}
+```
+
+> 仅当 `web_search` 设置了 `extra_sources > 0` 时，`sources` 才会包含结构化来源。
 
 ### `web_fetch` — 网页内容抓取
 
-通过 Tavily Extract API 获取完整网页内容，返回 Markdown 格式。Tavily 失败时自动降级到 Firecrawl Scrape 进行托底抓取。
+通过 Tavily Extract API 获取完整网页内容，返回 Markdown 格式文本。Tavily 失败时自动降级到 Firecrawl Scrape 进行托底抓取。
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `url` | string | ✅ | 目标网页 URL |
+
+返回值：`string`（Markdown 格式的网页内容）
 
 ### `web_map` — 站点结构映射
 
@@ -184,6 +224,20 @@ claude mcp list
 | `max_breadth` | int | ❌ | `20` | 每页最大跟踪链接数（1-500） |
 | `limit` | int | ❌ | `50` | 总链接处理数上限（1-500） |
 | `timeout` | int | ❌ | `150` | 超时秒数（10-150） |
+
+返回值（`string`，JSON 格式）：
+
+```json
+{
+  "base_url": "https://docs.python.org/3/library/",
+  "results": [
+    "https://docs.python.org/3/library",
+    "https://docs.python.org/3/sqlite3.html",
+    "..."
+  ],
+  "response_time": 0.14
+}
+```
 
 ### `get_config_info` — 配置诊断
 
