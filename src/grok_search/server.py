@@ -197,7 +197,8 @@ async def web_search(
     tavily_count = 0
     if extra_sources > 0:
         if has_firecrawl and has_tavily:
-            firecrawl_count = round(extra_sources * 1)
+            # P1-4: Split evenly instead of giving all to firecrawl
+            firecrawl_count = extra_sources // 2
             tavily_count = extra_sources - firecrawl_count
         elif has_firecrawl:
             firecrawl_count = extra_sources

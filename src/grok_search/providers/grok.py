@@ -135,7 +135,8 @@ class GrokSearchProvider(BaseSearchProvider):
         if platform:
             platform_prompt = "\n\nYou should search the web for the information you need, and focus on these platform: " + platform + "\n"
 
-        time_context = get_local_time_info() + "\n"
+        # P1-5: Only inject time context for time-sensitive queries
+        time_context = (get_local_time_info() + "\n") if _needs_time_context(query) else ""
 
         # Build messages array: support multi-turn follow-up
         if history:
@@ -144,10 +145,11 @@ class GrokSearchProvider(BaseSearchProvider):
             messages.extend(history)
             messages.append({"role": "user", "content": time_context + query + platform_prompt})
         else:
-            # Single-turn: original behavior
+            # Single-turn: system has search_prompt, user only needs query
+            # P1-6: Removed duplicate search_prompt from user message
             messages = [
                 {"role": "system", "content": search_prompt},
-                {"role": "user", "content": time_context + search_prompt + query + platform_prompt},
+                {"role": "user", "content": time_context + query + platform_prompt},
             ]
 
         payload = {
