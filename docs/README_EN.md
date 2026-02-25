@@ -19,10 +19,15 @@ Grok Search MCP is an MCP server built on [FastMCP](https://github.com/jlowin/fa
 
 ```
 Claude --MCP--> Grok Search Server
-                  ├─ web_search  ---> Grok API (AI Search)
-                  ├─ web_fetch   ---> Tavily Extract (Content Extraction)
-                  └─ web_map     ---> Tavily Map (Site Mapping)
+                  ├─ web_search      ---> Grok API (AI Search)
+                  ├─ search_followup ---> Grok API (Follow-up, reuses conversation context)
+                  ├─ search_reflect  ---> Grok API (Reflect → Supplement → Cross-validate)
+                  ├─ search_planning ---> Structured planning scaffold (zero API calls)
+                  ├─ web_fetch       ---> Tavily Extract → Firecrawl Scrape (Content Extraction)
+                  └─ web_map         ---> Tavily Map (Site Mapping)
 ```
+
+> 💡 **Recommended Pipeline**: For complex queries, use `search_planning → web_search → search_followup → search_reflect` in sequence — plan first, execute, then verify.
 
 ### Features
 
@@ -110,6 +115,11 @@ You can also configure additional environment variables in the `env` field:
 | `GROK_RETRY_MAX_ATTEMPTS` | No | `3` | Max retry attempts |
 | `GROK_RETRY_MULTIPLIER` | No | `1` | Retry backoff multiplier |
 | `GROK_RETRY_MAX_WAIT` | No | `10` | Max retry wait in seconds |
+| `FIRECRAWL_API_KEY` | No | - | Firecrawl API key (fallback when Tavily fails) |
+| `FIRECRAWL_API_URL` | No | `https://api.firecrawl.dev/v2` | Firecrawl API endpoint |
+| `GROK_SESSION_TIMEOUT` | No | `600` | Follow-up session timeout in seconds (default 10 min) |
+| `GROK_MAX_SESSIONS` | No | `20` | Max concurrent sessions |
+| `GROK_MAX_SEARCHES` | No | `50` | Max searches per session |
 
 
 ### Verify Installation
@@ -243,8 +253,70 @@ Modifies project-level `.claude/settings.json` `permissions.deny` to disable Cla
 
 ### `search_planning` — Search Planning
 
-A structured multi-phase planning scaffold to generate an executable search plan before running complex searches.
+A structured multi-phase planning scaffold to generate an executable search plan before running complex searches. Guides the LLM through 6 phases: **Intent Analysis → Complexity Assessment → Query Decomposition → Search Strategy → Tool Selection → Execution Order**.
+
+> ⚠️ **Note**: This tool makes **zero API calls**. It is purely a structured thinking framework — the LLM (Claude) does all the reasoning, the tool only records and assembles the plan.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `phase` | string | Yes | - | Phase name (see 6 phases below) |
+| `thought` | string | Yes | - | Reasoning for current phase |
+| `session_id` | string | No | `""` | Planning session ID (auto-generated on first call) |
+| `is_revision` | bool | No | `false` | Whether revising an existing phase |
+| `revises_phase` | string | No | `""` | Name of phase being revised |
+| `confidence` | float | No | `1.0` | Confidence score |
+| `phase_data` | dict/list | No | `null` | Structured phase output |
+
+**6 Phases**:
+
+| Phase | Purpose | phase_data Example |
+|-------|---------|-------------------|
+| `intent_analysis` | Distill core question, query type, time sensitivity | `{core_question, query_type, time_sensitivity, domain}` |
+| `complexity_assessment` | Rate complexity 1-3, determines required phases | `{level, estimated_sub_queries, justification}` |
+| `query_decomposition` | Split into sub-queries with dependencies | `[{id, goal, tool_hint, boundary, depends_on}]` |
+| `search_strategy` | Search terms + approach | `{approach, search_terms, fallback_plan}` |
+| `tool_selection` | Assign tool per sub-query | `[{sub_query_id, tool, reason}]` |
+| `execution_order` | Parallel/sequential ordering | `{parallel, sequential, estimated_rounds}` |
+
+Return value:
+
+```json
+{
+  "session_id": "a1b2c3d4e5f6",
+  "completed_phases": ["intent_analysis", "complexity_assessment"],
+  "complexity_level": 2,
+  "plan_complete": false,
+  "phases_remaining": ["query_decomposition", "search_strategy", "tool_selection", "execution_order"]
+}
+```
+
+When `plan_complete: true`, returns `executable_plan` with the full plan.
+
 </details>
+
+### Recommended Pipeline
+
+For complex queries, combine the tools in this pipeline:
+
+```
+┌─────────────────────┐
+│ 1. search_planning  │  Plan: 6-phase structured thinking (zero API calls)
+│    ↓ outputs plan   │  → sub-query list + search strategy + execution order
+├─────────────────────┤
+│ 2. web_search       │  Execute: search each sub-query per plan
+│    ↓ returns IDs    │  → initial answers + session_id + conversation_id
+├─────────────────────┤
+│ 3. search_followup  │  Drill down: reuse conversation context for details
+│    ↓ same session   │  → supplementary info (scores, specifics, etc.)
+├─────────────────────┤
+│ 4. search_reflect   │  Verify: auto-reflect → supplement → cross-validate
+│    ↓ final answer   │  → high-confidence complete answer
+├─────────────────────┤
+│ 5. get_sources      │  Trace: retrieve source details for each step
+└─────────────────────┘
+```
+
+> For simple queries, just use `web_search` directly — no need for the full pipeline.
 
 ## 4. FAQ
 
@@ -267,6 +339,22 @@ A: An OpenAI-compatible API endpoint (supporting `/chat/completions` and `/model
 Q: How to verify configuration?
 </summary>
 A: Say "Show grok-search configuration info" in a Claude conversation to automatically test the API connection and display results.
+</details>
+
+<details>
+<summary>
+Q: Source separation not working?
+</summary>
+A: <code>web_search</code> internally uses <code>split_answer_and_sources</code> to separate the answer text from source citations. This depends on the model outputting specific formats (e.g., <code>sources([...])</code> function calls, <code>## Sources</code> heading separators).<br><br>
+When using third-party OpenAI-compatible APIs (not official Grok at <code>api.x.ai</code>), the model typically doesn't output structured source markers, so the <code>content</code> field may contain mixed content.<br><br>
+<strong>Recommended</strong>: Set <code>extra_sources > 0</code> to independently fetch structured sources via Tavily/Firecrawl. Retrieve source details (URL, title, description) using the <code>get_sources</code> tool.
+</details>
+
+<details>
+<summary>
+Q: Does search_planning consume API quota?
+</summary>
+A: No. <code>search_planning</code> is a pure in-memory state machine. The LLM (Claude) does all reasoning; the tool only records and assembles the plan. Zero API calls throughout.
 </details>
 
 ## License

@@ -130,11 +130,14 @@ def _extra_results_to_sources(
 
     Returns: session_id (for get_sources), conversation_id (for search_followup), content, sources_count.
 
-    💡 **For complex multi-aspect topics**, break into focused sub-queries:
-      1. Identify distinct aspects of the question
-      2. Call web_search separately for each aspect
-      3. Use search_followup to ask follow-up questions in the same context
-      4. Use search_reflect for important queries needing reflection & verification
+    💡 **For complex multi-aspect topics**, use the recommended pipeline:
+      1. Start with **search_planning** to generate a structured search plan (zero API cost)
+      2. Execute each sub-query with **web_search**
+      3. Use **search_followup** to drill into details within the same conversation context
+      4. Use **search_reflect** for queries needing reflection, verification, or cross-validation
+      5. Use **get_sources** to retrieve source details for any session_id
+
+    For simple single-aspect lookups, just call web_search directly.
     """,
     meta={"version": "4.0.0", "author": "guda.studio"},
 )
@@ -296,6 +299,9 @@ async def search_followup(
     - The question requires high accuracy
     - You need comprehensive coverage of a topic
     - Cross-validation of facts is important
+
+    Can be used standalone or as the final verification step in the pipeline:
+    search_planning → web_search → search_followup → **search_reflect**
 
     For simple lookups, use web_search instead (faster, cheaper).
     """,
@@ -806,6 +812,8 @@ async def toggle_builtin_tools(
     ### 5. `tool_selection` → fill `tool_plan`
     Map each sub-query to optimal tool:
     - **web_search**(query, platform?, extra_sources?): general retrieval
+    - **search_followup**(query, conversation_id): drill into details in same conversation
+    - **search_reflect**(query, context?, cross_validate?): high-accuracy with reflection & validation
     - **web_fetch**(url): extract full markdown from known URL
     - **web_map**(url, instructions?, max_depth?): discover site structure
 
