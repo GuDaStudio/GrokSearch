@@ -16,9 +16,9 @@ try:
     from grok_search.logger import log_info
     from grok_search.config import config
     from grok_search.sources import SourcesCache, merge_sources, new_session_id, split_answer_and_sources
+    from grok_search.conversation import conversation_manager
+    from grok_search.reflect import ReflectEngine
     from grok_search.planning import (
-        IntentOutput, ComplexityOutput, SubQuery,
-        StrategyOutput, ToolPlanItem, ExecutionOrderOutput,
         engine as planning_engine,
     )
 except ImportError:
@@ -26,9 +26,9 @@ except ImportError:
     from .logger import log_info
     from .config import config
     from .sources import SourcesCache, merge_sources, new_session_id, split_answer_and_sources
+    from .conversation import conversation_manager
+    from .reflect import ReflectEngine
     from .planning import (
-        IntentOutput, ComplexityOutput, SubQuery,
-        StrategyOutput, ToolPlanItem, ExecutionOrderOutput,
         engine as planning_engine,
     )
 
@@ -122,15 +122,20 @@ def _extra_results_to_sources(
 @mcp.tool(
     name="web_search",
     description="""
-    Before using this tool, please use the search_planning tool to plan the search carefully.
-    Performs a deep web search based on the given query and returns Grok's answer directly.
+    AI-powered web search via Grok API. Returns a single answer for a single query.
 
-    This tool extracts sources if provided by upstream, caches them, and returns:
-    - session_id: string (When you feel confused or curious about the main content, use this field to invoke the get_sources tool to obtain the corresponding list of information sources)
-    - content: string (answer only)
-    - sources_count: int
+    Returns: session_id (for get_sources), conversation_id (for search_followup), content, sources_count.
+
+    💡 **For complex multi-aspect topics**, use the recommended pipeline:
+      1. Start with **search_planning** to generate a structured search plan (zero API cost)
+      2. Execute each sub-query with **web_search**
+      3. Use **search_followup** to drill into details within the same conversation context
+      4. Use **search_reflect** for queries needing reflection, verification, or cross-validation
+      5. Use **get_sources** to retrieve source details for any session_id
+
+    For simple single-aspect lookups, just call web_search directly.
     """,
-    meta={"version": "2.0.0", "author": "guda.studio"},
+    meta={"version": "4.0.0", "author": "guda.studio"},
 )
 async def web_search(
     query: Annotated[str, "Clear, self-contained natural-language search query."],
@@ -138,23 +143,45 @@ async def web_search(
     model: Annotated[str, "Optional model ID for this request only. This value is used ONLY when user explicitly provided."] = "",
     extra_sources: Annotated[int, "Number of additional reference results from Tavily/Firecrawl. Set 0 to disable. Default 0."] = 0,
 ) -> dict:
+    return await _execute_search(query=query, platform=platform, model=model, extra_sources=extra_sources)
+
+
+async def _execute_search(
+    query: str,
+    platform: str = "",
+    model: str = "",
+    extra_sources: int = 0,
+    history: list[dict] | None = None,
+    conversation_id: str = "",
+) -> dict:
+    """Core search logic shared by web_search, search_followup, and search_reflect."""
     session_id = new_session_id()
     try:
         api_url = config.grok_api_url
         api_key = config.grok_api_key
     except ValueError as e:
         await _SOURCES_CACHE.set(session_id, [])
-        return {"session_id": session_id, "content": f"配置错误: {str(e)}", "sources_count": 0}
+        return {"error": "config_error", "message": f"配置错误: {str(e)}", "session_id": session_id, "conversation_id": "", "content": "", "sources_count": 0}
 
     effective_model = config.grok_model
     if model:
         available = await _get_available_models_cached(api_url, api_key)
         if available and model not in available:
             await _SOURCES_CACHE.set(session_id, [])
-            return {"session_id": session_id, "content": f"无效模型: {model}", "sources_count": 0}
+            return {"error": "invalid_model", "message": f"无效模型: {model}", "session_id": session_id, "conversation_id": "", "content": "", "sources_count": 0}
         effective_model = model
 
     grok_provider = GrokSearchProvider(api_url, api_key, effective_model)
+
+    # Conversation management
+    conv_session = None
+    if conversation_id:
+        conv_session = await conversation_manager.get(conversation_id)
+    if conv_session is None:
+        conv_session = await conversation_manager.get_or_create()
+        conversation_id = conv_session.session_id
+
+    conv_session.add_user_message(query)
 
     # 计算额外信源配额
     has_tavily = bool(config.tavily_api_key)
@@ -163,7 +190,7 @@ async def web_search(
     tavily_count = 0
     if extra_sources > 0:
         if has_firecrawl and has_tavily:
-            firecrawl_count = round(extra_sources * 1)
+            firecrawl_count = extra_sources // 2
             tavily_count = extra_sources - firecrawl_count
         elif has_firecrawl:
             firecrawl_count = extra_sources
@@ -173,7 +200,7 @@ async def web_search(
     # 并行执行搜索任务
     async def _safe_grok() -> str:
         try:
-            return await grok_provider.search(query, platform)
+            return await grok_provider.search(query, platform, history=history)
         except Exception:
             return ""
 
@@ -213,8 +240,97 @@ async def web_search(
     extra = _extra_results_to_sources(tavily_results, firecrawl_results)
     all_sources = merge_sources(grok_sources, extra)
 
+    conv_session.add_assistant_message(answer)
+
     await _SOURCES_CACHE.set(session_id, all_sources)
-    return {"session_id": session_id, "content": answer, "sources_count": len(all_sources)}
+    return {
+        "session_id": session_id,
+        "conversation_id": conversation_id,
+        "content": answer,
+        "sources_count": len(all_sources),
+    }
+
+
+@mcp.tool(
+    name="search_followup",
+    description="""
+    Ask a follow-up question in an existing search conversation context.
+    Requires a conversation_id from a previous web_search or search_followup result.
+
+    Use this when you need more details, want comparison, or want to ask about specific points from a previous answer.
+    For a completely new topic, use web_search instead.
+    """,
+    meta={"version": "1.0.0", "author": "guda.studio"},
+)
+async def search_followup(
+    query: Annotated[str, "Follow-up question to ask in the existing conversation context."],
+    conversation_id: Annotated[str, "Conversation ID from a previous web_search or search_followup result."],
+    extra_sources: Annotated[int, "Number of additional reference results from Tavily/Firecrawl. Default 0."] = 0,
+) -> dict:
+    # Get existing conversation for history
+    conv_session = await conversation_manager.get(conversation_id)
+    if conv_session is None:
+        return {"error": "session_expired", "message": "会话已过期或不存在，请使用 web_search 开始新搜索。", "session_id": "", "conversation_id": conversation_id, "content": "", "sources_count": 0}
+
+    history = conv_session.get_history()
+
+    return await _execute_search(
+        query=query,
+        extra_sources=extra_sources,
+        history=history,
+        conversation_id=conversation_id,
+    )
+
+
+@mcp.tool(
+    name="search_reflect",
+    description="""
+    Reflection-enhanced web search for important queries where accuracy matters.
+
+    Performs an initial search, then reflects on the answer to identify gaps,
+    automatically performs supplementary searches, and optionally cross-validates
+    information across multiple sources.
+
+    Use this instead of web_search when:
+    - The question requires high accuracy
+    - You need comprehensive coverage of a topic
+    - Cross-validation of facts is important
+
+    Can be used standalone or as the final verification step in the pipeline:
+    search_planning → web_search → search_followup → **search_reflect**
+
+    For simple lookups, use web_search instead (faster, cheaper).
+    """,
+    meta={"version": "1.0.0", "author": "guda.studio"},
+)
+async def search_reflect(
+    query: Annotated[str, "Search query to research with reflection."],
+    context: Annotated[str, "Optional background information or previous findings to consider."] = "",
+    max_reflections: Annotated[int, "Number of reflection rounds (1-3). Higher = more thorough but slower."] = 1,
+    cross_validate: Annotated[bool, "If true, cross-validates facts across search rounds for consistency."] = False,
+    extra_sources: Annotated[int, "Number of Tavily/Firecrawl sources per search round. Default 3."] = 3,
+) -> dict:
+    try:
+        api_url = config.grok_api_url
+        api_key = config.grok_api_key
+    except ValueError as e:
+        return {"error": "config_error", "message": f"配置错误: {str(e)}", "session_id": "", "conversation_id": "", "content": "", "sources_count": 0}
+
+    grok_provider = GrokSearchProvider(api_url, api_key, config.grok_model)
+    engine = ReflectEngine(grok_provider, conversation_manager)
+
+    # Create a search executor that uses _execute_search (with conversation_id reuse)
+    async def executor(q: str, es: int, history: list[dict] | None, conv_id: str) -> dict:
+        return await _execute_search(query=q, extra_sources=es, history=history, conversation_id=conv_id)
+
+    return await engine.run(
+        query=query,
+        context=context,
+        max_reflections=max_reflections,
+        cross_validate=cross_validate,
+        extra_sources=extra_sources,
+        execute_search=executor,
+    )
 
 
 @mcp.tool(
@@ -434,10 +550,10 @@ async def _call_tavily_map(url: str, instructions: str = None, max_depth: int = 
 async def web_map(
     url: Annotated[str, "Root URL to begin the mapping (e.g., 'https://docs.example.com')."],
     instructions: Annotated[str, "Natural language instructions for the crawler to filter or focus on specific content."] = "",
-    max_depth: Annotated[int, Field(description="Maximum depth of mapping from the base URL.", ge=1, le=5)] = 1,
-    max_breadth: Annotated[int, Field(description="Maximum number of links to follow per page.", ge=1, le=500)] = 20,
-    limit: Annotated[int, Field(description="Total number of links to process before stopping.", ge=1, le=500)] = 50,
-    timeout: Annotated[int, Field(description="Maximum time in seconds for the operation.", ge=10, le=150)] = 150
+    max_depth: Annotated[int, "Maximum depth of mapping from the base URL (1-5)."] = 1,
+    max_breadth: Annotated[int, "Maximum number of links to follow per page (1-500)."] = 20,
+    limit: Annotated[int, "Total number of links to process before stopping (1-500)."] = 50,
+    timeout: Annotated[int, "Maximum time in seconds for the operation (10-150)."] = 150
 ) -> str:
     result = await _call_tavily_map(url, instructions, max_depth, max_breadth, limit, timeout)
     return result
@@ -692,6 +808,8 @@ async def toggle_builtin_tools(
     ### 5. `tool_selection` → fill `tool_plan`
     Map each sub-query to optimal tool:
     - **web_search**(query, platform?, extra_sources?): general retrieval
+    - **search_followup**(query, conversation_id): drill into details in same conversation
+    - **search_reflect**(query, context?, cross_validate?): high-accuracy with reflection & validation
     - **web_fetch**(url): extract full markdown from known URL
     - **web_map**(url, instructions?, max_depth?): discover site structure
 
@@ -721,26 +839,34 @@ async def search_planning(
     phase: Annotated[str, "Current phase: intent_analysis | complexity_assessment | query_decomposition | search_strategy | tool_selection | execution_order"],
     thought: Annotated[str, "Your reasoning for this phase — explain WHY, not just WHAT"],
     next_phase_needed: Annotated[bool, "true to continue planning, false when done or plan auto-completes"],
-    intent: Optional[IntentOutput] = None,
-    complexity: Optional[ComplexityOutput] = None,
-    sub_queries: Optional[list[SubQuery]] = None,
-    strategy: Optional[StrategyOutput] = None,
-    tool_plan: Optional[list[ToolPlanItem]] = None,
-    execution_order: Optional[ExecutionOrderOutput] = None,
+    intent_json: Annotated[str, "JSON string matching IntentOutput schema"] = "",
+    complexity_json: Annotated[str, "JSON string matching ComplexityOutput schema"] = "",
+    sub_queries_json: Annotated[str, "JSON array of SubQuery objects"] = "",
+    strategy_json: Annotated[str, "JSON string matching StrategyOutput schema"] = "",
+    tool_plan_json: Annotated[str, "JSON array of ToolPlanItem objects"] = "",
+    execution_order_json: Annotated[str, "JSON string matching ExecutionOrderOutput schema"] = "",
     session_id: Annotated[str, "Session ID from previous call. Empty for new session."] = "",
     is_revision: Annotated[bool, "true to revise a previously completed phase"] = False,
     revises_phase: Annotated[str, "Phase name to revise (required if is_revision=true)"] = "",
     confidence: Annotated[float, "Confidence in this phase's output (0.0-1.0)"] = 1.0,
 ) -> str:
     import json
+    
+    def _parse_json(jstr):
+        if not jstr or not jstr.strip():
+            return None
+        try:
+            return json.loads(jstr)
+        except Exception:
+            return None
 
     phase_data_map = {
-        "intent_analysis": intent.model_dump() if intent else None,
-        "complexity_assessment": complexity.model_dump() if complexity else None,
-        "query_decomposition": [sq.model_dump() for sq in sub_queries] if sub_queries else None,
-        "search_strategy": strategy.model_dump() if strategy else None,
-        "tool_selection": [tp.model_dump() for tp in tool_plan] if tool_plan else None,
-        "execution_order": execution_order.model_dump() if execution_order else None,
+        "intent_analysis": _parse_json(intent_json),
+        "complexity_assessment": _parse_json(complexity_json),
+        "query_decomposition": _parse_json(sub_queries_json),
+        "search_strategy": _parse_json(strategy_json),
+        "tool_selection": _parse_json(tool_plan_json),
+        "execution_order": _parse_json(execution_order_json),
     }
 
     target = revises_phase if is_revision and revises_phase else phase
