@@ -17,6 +17,7 @@ try:
     from grok_search.config import config
     from grok_search.sources import SourcesCache, merge_sources, new_session_id, split_answer_and_sources
     from grok_search.conversation import conversation_manager
+    from grok_search.reflect import ReflectEngine
     from grok_search.planning import (
         IntentOutput, ComplexityOutput, SubQuery,
         StrategyOutput, ToolPlanItem, ExecutionOrderOutput,
@@ -28,6 +29,7 @@ except ImportError:
     from .config import config
     from .sources import SourcesCache, merge_sources, new_session_id, split_answer_and_sources
     from .conversation import conversation_manager
+    from .reflect import ReflectEngine
     from .planning import (
         IntentOutput, ComplexityOutput, SubQuery,
         StrategyOutput, ToolPlanItem, ExecutionOrderOutput,
@@ -124,70 +126,62 @@ def _extra_results_to_sources(
 @mcp.tool(
     name="web_search",
     description="""
-    Before using this tool, please use the search_planning tool to plan the search carefully.
-    Performs a deep web search based on the given query and returns Grok's answer directly.
+    AI-powered web search via Grok API. Returns a single answer for a single query.
 
-    This tool extracts sources if provided by upstream, caches them, and returns:
-    - session_id: string (When you feel confused or curious about the main content, use this field to invoke the get_sources tool to obtain the corresponding list of information sources)
-    - conversation_id: string (Use this ID with follow_up=true to ask follow-up questions in the same conversation context)
-    - content: string (answer only)
-    - sources_count: int
+    Returns: session_id (for get_sources), conversation_id (for search_followup), content, sources_count.
 
-    **Follow-up Support:**
-    - First search: leave follow_up=false, conversation_id empty → returns a conversation_id
-    - Follow-up: set follow_up=true + pass the conversation_id from previous result → AI answers with full conversation context
-    - Use follow_up when: need more details, want comparison, ask about specific points from previous answer
-    - Use new search when: completely different topic, unrelated question
+    💡 **For complex multi-aspect topics**, break into focused sub-queries:
+      1. Identify distinct aspects of the question
+      2. Call web_search separately for each aspect
+      3. Use search_followup to ask follow-up questions in the same context
+      4. Use search_reflect for important queries needing reflection & verification
     """,
-    meta={"version": "3.0.0", "author": "guda.studio"},
+    meta={"version": "4.0.0", "author": "guda.studio"},
 )
 async def web_search(
     query: Annotated[str, "Clear, self-contained natural-language search query."],
-    follow_up: Annotated[bool, "Set to true to continue asking in the same conversation context. Requires conversation_id from a previous search result."] = False,
-    conversation_id: Annotated[str, "Conversation ID from a previous web_search result. Required when follow_up=true. Leave empty for new search."] = "",
     platform: Annotated[str, "Target platform to focus on (e.g., 'Twitter', 'GitHub', 'Reddit'). Leave empty for general web search."] = "",
     model: Annotated[str, "Optional model ID for this request only. This value is used ONLY when user explicitly provided."] = "",
     extra_sources: Annotated[int, "Number of additional reference results from Tavily/Firecrawl. Set 0 to disable. Default 0."] = 0,
 ) -> dict:
+    return await _execute_search(query=query, platform=platform, model=model, extra_sources=extra_sources)
+
+
+async def _execute_search(
+    query: str,
+    platform: str = "",
+    model: str = "",
+    extra_sources: int = 0,
+    history: list[dict] | None = None,
+    conversation_id: str = "",
+) -> dict:
+    """Core search logic shared by web_search, search_followup, and search_reflect."""
     session_id = new_session_id()
     try:
         api_url = config.grok_api_url
         api_key = config.grok_api_key
     except ValueError as e:
         await _SOURCES_CACHE.set(session_id, [])
-        return {"session_id": session_id, "conversation_id": "", "content": f"配置错误: {str(e)}", "sources_count": 0}
+        return {"error": "config_error", "message": f"配置错误: {str(e)}"}
 
     effective_model = config.grok_model
     if model:
         available = await _get_available_models_cached(api_url, api_key)
         if available and model not in available:
             await _SOURCES_CACHE.set(session_id, [])
-            return {"session_id": session_id, "conversation_id": "", "content": f"无效模型: {model}", "sources_count": 0}
+            return {"error": "invalid_model", "message": f"无效模型: {model}"}
         effective_model = model
 
     grok_provider = GrokSearchProvider(api_url, api_key, effective_model)
 
-    # --- Follow-up conversation management ---
-    history: list[dict] | None = None
+    # Conversation management
     conv_session = None
-
-    if follow_up and conversation_id:
+    if conversation_id:
         conv_session = await conversation_manager.get(conversation_id)
-        if conv_session is None:
-            return {
-                "session_id": session_id,
-                "conversation_id": conversation_id,
-                "content": "会话已过期或不存在，请不带 follow_up 开始新搜索。",
-                "sources_count": 0,
-                "can_follow_up": False,
-            }
-        history = conv_session.get_history()
-    else:
-        # New conversation
+    if conv_session is None:
         conv_session = await conversation_manager.get_or_create()
         conversation_id = conv_session.session_id
 
-    # Record user message
     conv_session.add_user_message(query)
 
     # 计算额外信源配额
@@ -197,7 +191,6 @@ async def web_search(
     tavily_count = 0
     if extra_sources > 0:
         if has_firecrawl and has_tavily:
-            # P1-4: Split evenly instead of giving all to firecrawl
             firecrawl_count = extra_sources // 2
             tavily_count = extra_sources - firecrawl_count
         elif has_firecrawl:
@@ -248,7 +241,6 @@ async def web_search(
     extra = _extra_results_to_sources(tavily_results, firecrawl_results)
     all_sources = merge_sources(grok_sources, extra)
 
-    # Record assistant response
     conv_session.add_assistant_message(answer)
 
     await _SOURCES_CACHE.set(session_id, all_sources)
@@ -257,9 +249,86 @@ async def web_search(
         "conversation_id": conversation_id,
         "content": answer,
         "sources_count": len(all_sources),
-        "can_follow_up": True,
-        "search_count": conv_session.search_count,
     }
+
+
+@mcp.tool(
+    name="search_followup",
+    description="""
+    Ask a follow-up question in an existing search conversation context.
+    Requires a conversation_id from a previous web_search or search_followup result.
+
+    Use this when you need more details, want comparison, or want to ask about specific points from a previous answer.
+    For a completely new topic, use web_search instead.
+    """,
+    meta={"version": "1.0.0", "author": "guda.studio"},
+)
+async def search_followup(
+    query: Annotated[str, "Follow-up question to ask in the existing conversation context."],
+    conversation_id: Annotated[str, "Conversation ID from a previous web_search or search_followup result."],
+    extra_sources: Annotated[int, "Number of additional reference results from Tavily/Firecrawl. Default 0."] = 0,
+) -> dict:
+    # Get existing conversation for history
+    conv_session = await conversation_manager.get(conversation_id)
+    if conv_session is None:
+        return {"error": "session_expired", "message": "会话已过期或不存在，请使用 web_search 开始新搜索。"}
+
+    history = conv_session.get_history()
+
+    return await _execute_search(
+        query=query,
+        extra_sources=extra_sources,
+        history=history,
+        conversation_id=conversation_id,
+    )
+
+
+@mcp.tool(
+    name="search_reflect",
+    description="""
+    Reflection-enhanced web search for important queries where accuracy matters.
+
+    Performs an initial search, then reflects on the answer to identify gaps,
+    automatically performs supplementary searches, and optionally cross-validates
+    information across multiple sources.
+
+    Use this instead of web_search when:
+    - The question requires high accuracy
+    - You need comprehensive coverage of a topic
+    - Cross-validation of facts is important
+
+    For simple lookups, use web_search instead (faster, cheaper).
+    """,
+    meta={"version": "1.0.0", "author": "guda.studio"},
+)
+async def search_reflect(
+    query: Annotated[str, "Search query to research with reflection."],
+    context: Annotated[str, "Optional background information or previous findings to consider."] = "",
+    max_reflections: Annotated[int, "Number of reflection rounds (1-3). Higher = more thorough but slower."] = 1,
+    cross_validate: Annotated[bool, "If true, cross-validates facts across search rounds for consistency."] = False,
+    extra_sources: Annotated[int, "Number of Tavily/Firecrawl sources per search round. Default 3."] = 3,
+) -> dict:
+    try:
+        api_url = config.grok_api_url
+        api_key = config.grok_api_key
+    except ValueError as e:
+        return {"error": "config_error", "message": f"配置错误: {str(e)}"}
+
+    grok_provider = GrokSearchProvider(api_url, api_key, config.grok_model)
+    engine = ReflectEngine(grok_provider, conversation_manager)
+
+    # Create a search executor that uses _execute_search
+    async def executor(q: str, es: int, history: list[dict] | None) -> dict:
+        return await _execute_search(query=q, extra_sources=es, history=history)
+
+    return await engine.run(
+        query=query,
+        context=context,
+        max_reflections=max_reflections,
+        cross_validate=cross_validate,
+        extra_sources=extra_sources,
+        execute_search=executor,
+    )
 
 
 @mcp.tool(

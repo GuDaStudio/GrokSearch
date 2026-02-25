@@ -132,22 +132,18 @@ claude mcp list
 ## 三、MCP 工具介绍
 
 <details>
-<summary>本项目提供八个 MCP 工具（展开查看）</summary>
+<summary>本项目提供十个 MCP 工具（展开查看）</summary>
 
 ### `web_search` — AI 网络搜索
 
-通过 Grok API 执行 AI 驱动的网络搜索，返回 Grok 的回答正文。支持**多轮追问**——首次搜索返回 `conversation_id`，后续搜索传入该 ID 即可在同一上下文中追问。
+通过 Grok API 执行 AI 驱动的网络搜索，返回 Grok 的回答正文。
 
 | 参数 | 类型 | 必填 | 默认值 | 说明 |
 |------|------|------|--------|------|
 | `query` | string | ✅ | - | 搜索查询语句 |
-| `follow_up` | bool | ❌ | `false` | 设为 `true` 继续追问（需提供 `conversation_id`） |
-| `conversation_id` | string | ❌ | `""` | 上一次搜索返回的会话 ID |
 | `platform` | string | ❌ | `""` | 聚焦平台（如 `"Twitter"`, `"GitHub, Reddit"`） |
 | `model` | string | ❌ | `null` | 按次指定 Grok 模型 ID |
 | `extra_sources` | int | ❌ | `0` | 额外补充信源数量（Tavily/Firecrawl） |
-
-自动检测查询中的时间相关关键词（如"最新""今天""recent"等），按需注入本地时间上下文。
 
 返回值（`dict`）：
 
@@ -156,24 +152,62 @@ claude mcp list
   "session_id": "8236bf0b6a79",
   "conversation_id": "0fe631c32397",
   "content": "Grok 回答正文...",
-  "sources_count": 3,
-  "can_follow_up": true,
-  "search_count": 1
+  "sources_count": 3
 }
 ```
 
 | 字段 | 说明 |
 |------|------|
 | `session_id` | 本次查询的信源缓存 ID（用于 `get_sources`） |
-| `conversation_id` | 会话 ID（用于后续 `follow_up` 追问） |
+| `conversation_id` | 会话 ID（用于 `search_followup` 追问） |
 | `content` | Grok 回答正文（已自动剥离信源标记） |
-| `sources_count` | 已缓存的信源数量（Grok 内置 + 额外 Tavily/Firecrawl） |
-| `can_follow_up` | 是否可以继续追问（`false` 表示会话已过期） |
-| `search_count` | 当前会话中的累计搜索次数 |
+| `sources_count` | 已缓存的信源数量 |
 
-> **追问使用方式**：首次搜索不传 `follow_up`/`conversation_id` → 记录返回的 `conversation_id` → 追问时设 `follow_up=true` 并传入该 ID。会话默认 10 分钟超时（可通过 `GROK_SESSION_TIMEOUT` 配置）。
+> **复杂查询建议**：对于多方面问题，建议拆分为多个聚焦的 `web_search` 调用，再用 `search_followup` 追问细节，或用 `search_reflect` 做深度研究。
 
-> **关于信源**：`sources_count` 可能为 0——Grok 搜索的信源以 `[^1]` 脚注形式内嵌在 `content` 文本中，而非结构化 URL。如需可点击的来源链接，请设置 `extra_sources > 0`（会调用 Tavily/Firecrawl 补充结构化信源）。
+### `search_followup` — 追问搜索 🆕
+
+在已有搜索上下文中追问，保持对话连贯。需传入 `web_search` 返回的 `conversation_id`。
+
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| `query` | string | ✅ | - | 追问内容 |
+| `conversation_id` | string | ✅ | - | 上一次搜索返回的 `conversation_id` |
+| `extra_sources` | int | ❌ | `0` | 额外补充信源 |
+
+返回值与 `web_search` 相同。会话默认 10 分钟超时（可通过 `GROK_SESSION_TIMEOUT` 配置）。
+
+### `search_reflect` — 反思增强搜索 🆕
+
+搜索后自动反思遗漏 → 补充搜索 → 可选交叉验证。适用于需要高准确度的查询。
+
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| `query` | string | ✅ | - | 搜索查询 |
+| `context` | string | ❌ | `""` | 已知背景信息 |
+| `max_reflections` | int | ❌ | `1` | 反思轮数（1-3，硬上限 3） |
+| `cross_validate` | bool | ❌ | `false` | 启用交叉验证 |
+| `extra_sources` | int | ❌ | `3` | 每轮补充信源数 |
+
+返回值（`dict`）：
+
+```json
+{
+  "session_id": "xxx",
+  "conversation_id": "yyy",
+  "content": "经反思增强的完整回答...",
+  "reflection_log": [
+    {"round": 1, "gap": "缺少最新数据", "supplementary_query": "..."}
+  ],
+  "validation": {"consistency": "high", "conflicts": [], "confidence": 0.92},
+  "sources_count": 8,
+  "search_rounds": 3
+}
+```
+
+> `validation` 字段仅在 `cross_validate=true` 时返回。硬预算：反思≤3轮、单轮≤30s、总计≤120s。
+
+
 
 ### `get_sources` — 获取信源
 
