@@ -125,7 +125,16 @@ class GrokSearchProvider(BaseSearchProvider):
     def get_provider_name(self) -> str:
         return "Grok"
 
-    async def search(self, query: str, platform: str = "", min_results: int = 3, max_results: int = 10, ctx=None, history: list[dict] | None = None) -> List[SearchResult]:
+    async def search(
+        self,
+        query: str,
+        platform: str = "",
+        min_results: int = 3,
+        max_results: int = 10,
+        ctx=None,
+        history: list[dict] | None = None,
+        skip_search_prompt: bool = False,
+    ) -> List[SearchResult]:
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
@@ -135,18 +144,21 @@ class GrokSearchProvider(BaseSearchProvider):
         if platform:
             platform_prompt = "\n\nYou should search the web for the information you need, and focus on these platform: " + platform + "\n"
 
-        # P1-5: Only inject time context for time-sensitive queries
+        # Only inject time context for time-sensitive queries
         time_context = (get_local_time_info() + "\n") if _needs_time_context(query) else ""
 
         # Build messages array: support multi-turn follow-up
-        if history:
+        if history and skip_search_prompt:
+            # Reflect/validate: use caller-supplied system prompt from history, no search_prompt
+            messages = list(history)
+            messages.append({"role": "user", "content": query})
+        elif history:
             # Multi-turn: system + history + new user query
             messages = [{"role": "system", "content": search_prompt}]
             messages.extend(history)
             messages.append({"role": "user", "content": time_context + query + platform_prompt})
         else:
             # Single-turn: system has search_prompt, user only needs query
-            # P1-6: Removed duplicate search_prompt from user message
             messages = [
                 {"role": "system", "content": search_prompt},
                 {"role": "user", "content": time_context + query + platform_prompt},

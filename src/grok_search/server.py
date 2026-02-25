@@ -162,14 +162,14 @@ async def _execute_search(
         api_key = config.grok_api_key
     except ValueError as e:
         await _SOURCES_CACHE.set(session_id, [])
-        return {"error": "config_error", "message": f"配置错误: {str(e)}"}
+        return {"error": "config_error", "message": f"配置错误: {str(e)}", "session_id": session_id, "conversation_id": "", "content": "", "sources_count": 0}
 
     effective_model = config.grok_model
     if model:
         available = await _get_available_models_cached(api_url, api_key)
         if available and model not in available:
             await _SOURCES_CACHE.set(session_id, [])
-            return {"error": "invalid_model", "message": f"无效模型: {model}"}
+            return {"error": "invalid_model", "message": f"无效模型: {model}", "session_id": session_id, "conversation_id": "", "content": "", "sources_count": 0}
         effective_model = model
 
     grok_provider = GrokSearchProvider(api_url, api_key, effective_model)
@@ -271,7 +271,7 @@ async def search_followup(
     # Get existing conversation for history
     conv_session = await conversation_manager.get(conversation_id)
     if conv_session is None:
-        return {"error": "session_expired", "message": "会话已过期或不存在，请使用 web_search 开始新搜索。"}
+        return {"error": "session_expired", "message": "会话已过期或不存在，请使用 web_search 开始新搜索。", "session_id": "", "conversation_id": conversation_id, "content": "", "sources_count": 0}
 
     history = conv_session.get_history()
 
@@ -312,14 +312,14 @@ async def search_reflect(
         api_url = config.grok_api_url
         api_key = config.grok_api_key
     except ValueError as e:
-        return {"error": "config_error", "message": f"配置错误: {str(e)}"}
+        return {"error": "config_error", "message": f"配置错误: {str(e)}", "session_id": "", "conversation_id": "", "content": "", "sources_count": 0}
 
     grok_provider = GrokSearchProvider(api_url, api_key, config.grok_model)
     engine = ReflectEngine(grok_provider, conversation_manager)
 
-    # Create a search executor that uses _execute_search
-    async def executor(q: str, es: int, history: list[dict] | None) -> dict:
-        return await _execute_search(query=q, extra_sources=es, history=history)
+    # Create a search executor that uses _execute_search (with conversation_id reuse)
+    async def executor(q: str, es: int, history: list[dict] | None, conv_id: str) -> dict:
+        return await _execute_search(query=q, extra_sources=es, history=history, conversation_id=conv_id)
 
     return await engine.run(
         query=query,

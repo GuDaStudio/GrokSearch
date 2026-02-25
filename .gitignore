@@ -20,6 +20,7 @@ test_output.*
 test_cqnu*
 test_cqnu.py
 test_followup.py
+test_new_tools_output.json
 
 # IDE
 .vscode/

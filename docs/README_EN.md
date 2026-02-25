@@ -129,39 +129,75 @@ This will automatically modify the **project-level** `.claude/settings.json` `pe
 ## 3. MCP Tools
 
 <details>
-<summary>This project provides eight MCP tools (click to expand)</summary>
+<summary>This project provides ten MCP tools (click to expand)</summary>
 
 ### `web_search` — AI Web Search
 
-Executes AI-driven web search via Grok API. By default it returns only Grok's answer and a `session_id` for retrieving sources later.
+Executes AI-driven web search via Grok API. Returns Grok's answer, a `session_id` for retrieving sources, and a `conversation_id` for follow-up.
 
-`web_search` does not expand sources in the response; it only returns `sources_count`. Sources are cached server-side by `session_id` and can be fetched with `get_sources`.
+💡 **For complex multi-aspect topics**, break into focused sub-queries:
+1. Identify distinct aspects of the question
+2. Call `web_search` separately for each aspect
+3. Use `search_followup` to ask follow-up questions in the same context
+4. Use `search_reflect` for important queries needing reflection & verification
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `query` | string | Yes | - | Search query |
+| `query` | string | Yes | - | Clear, self-contained search query |
 | `platform` | string | No | `""` | Focus platform (e.g., `"Twitter"`, `"GitHub, Reddit"`) |
 | `model` | string | No | `null` | Per-request Grok model ID |
 | `extra_sources` | int | No | `0` | Extra sources via Tavily/Firecrawl (0 disables) |
 
-Automatically detects time-related keywords in queries (e.g., "latest", "today", "recent"), injecting local time context to improve accuracy for time-sensitive searches.
-
 Return value (structured dict):
-- `session_id`: search session ID
-- `content`: answer only (sources removed)
+- `session_id`: for `get_sources`
+- `conversation_id`: for `search_followup`
+- `content`: answer text
 - `sources_count`: cached sources count
+
+### `search_followup` — Conversational Follow-up
+
+Ask a follow-up question in an existing search conversation context. Requires a `conversation_id` from a previous `web_search` or `search_followup` result.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `query` | string | Yes | - | Follow-up question |
+| `conversation_id` | string | Yes | - | From previous `web_search`/`search_followup` |
+| `extra_sources` | int | No | `0` | Extra sources via Tavily/Firecrawl |
+
+Return: same structure as `web_search`. Returns `{"error": "session_expired", ...}` if session expired.
+
+### `search_reflect` — Reflection-Enhanced Search
+
+Performs an initial search, then reflects on the answer to identify gaps, automatically performs supplementary searches, and optionally cross-validates information.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `query` | string | Yes | - | Search query |
+| `context` | string | No | `""` | Background information |
+| `max_reflections` | int | No | `1` | Reflection rounds (1-3, hard limit) |
+| `cross_validate` | bool | No | `false` | Cross-validate facts across rounds |
+| `extra_sources` | int | No | `3` | Tavily/Firecrawl sources per round (max 10) |
+
+Hard budget constraints: max 3 reflections, 60s per search, 30s per reflect/validate, 120s total.
+
+Return value:
+- `session_id`, `conversation_id`, `content`, `sources_count`, `search_rounds`
+- `reflection_log`: list of `{round, gap, supplementary_query}`
+- `round_sessions`: list of `{round, query, session_id}` for source traceability
+- `validation` (if `cross_validate=true`): `{consistency, conflicts, confidence}`
 
 ### `get_sources` — Retrieve Sources
 
-Retrieves the full cached source list for a previous `web_search` call.
+Retrieves the full cached source list for a previous search call.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `session_id` | string | Yes | `session_id` returned by `web_search` |
+| `session_id` | string | Yes | `session_id` from `web_search`/`search_reflect` |
 
-Return value (structured dict):
-- `session_id`
-- `sources_count`
+For `search_reflect`, use `round_sessions` to retrieve sources for each search round individually.
+
+Return value:
+- `session_id`, `sources_count`
 - `sources`: source list (each item includes `url`, may include `title`/`description`/`provider`)
 
 ### `web_fetch` — Web Content Extraction
