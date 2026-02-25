@@ -16,6 +16,7 @@ try:
     from grok_search.logger import log_info
     from grok_search.config import config
     from grok_search.sources import SourcesCache, merge_sources, new_session_id, split_answer_and_sources
+    from grok_search.conversation import conversation_manager
     from grok_search.planning import (
         IntentOutput, ComplexityOutput, SubQuery,
         StrategyOutput, ToolPlanItem, ExecutionOrderOutput,
@@ -26,6 +27,7 @@ except ImportError:
     from .logger import log_info
     from .config import config
     from .sources import SourcesCache, merge_sources, new_session_id, split_answer_and_sources
+    from .conversation import conversation_manager
     from .planning import (
         IntentOutput, ComplexityOutput, SubQuery,
         StrategyOutput, ToolPlanItem, ExecutionOrderOutput,
@@ -127,13 +129,22 @@ def _extra_results_to_sources(
 
     This tool extracts sources if provided by upstream, caches them, and returns:
     - session_id: string (When you feel confused or curious about the main content, use this field to invoke the get_sources tool to obtain the corresponding list of information sources)
+    - conversation_id: string (Use this ID with follow_up=true to ask follow-up questions in the same conversation context)
     - content: string (answer only)
     - sources_count: int
+
+    **Follow-up Support:**
+    - First search: leave follow_up=false, conversation_id empty → returns a conversation_id
+    - Follow-up: set follow_up=true + pass the conversation_id from previous result → AI answers with full conversation context
+    - Use follow_up when: need more details, want comparison, ask about specific points from previous answer
+    - Use new search when: completely different topic, unrelated question
     """,
-    meta={"version": "2.0.0", "author": "guda.studio"},
+    meta={"version": "3.0.0", "author": "guda.studio"},
 )
 async def web_search(
     query: Annotated[str, "Clear, self-contained natural-language search query."],
+    follow_up: Annotated[bool, "Set to true to continue asking in the same conversation context. Requires conversation_id from a previous search result."] = False,
+    conversation_id: Annotated[str, "Conversation ID from a previous web_search result. Required when follow_up=true. Leave empty for new search."] = "",
     platform: Annotated[str, "Target platform to focus on (e.g., 'Twitter', 'GitHub', 'Reddit'). Leave empty for general web search."] = "",
     model: Annotated[str, "Optional model ID for this request only. This value is used ONLY when user explicitly provided."] = "",
     extra_sources: Annotated[int, "Number of additional reference results from Tavily/Firecrawl. Set 0 to disable. Default 0."] = 0,
@@ -144,17 +155,40 @@ async def web_search(
         api_key = config.grok_api_key
     except ValueError as e:
         await _SOURCES_CACHE.set(session_id, [])
-        return {"session_id": session_id, "content": f"配置错误: {str(e)}", "sources_count": 0}
+        return {"session_id": session_id, "conversation_id": "", "content": f"配置错误: {str(e)}", "sources_count": 0}
 
     effective_model = config.grok_model
     if model:
         available = await _get_available_models_cached(api_url, api_key)
         if available and model not in available:
             await _SOURCES_CACHE.set(session_id, [])
-            return {"session_id": session_id, "content": f"无效模型: {model}", "sources_count": 0}
+            return {"session_id": session_id, "conversation_id": "", "content": f"无效模型: {model}", "sources_count": 0}
         effective_model = model
 
     grok_provider = GrokSearchProvider(api_url, api_key, effective_model)
+
+    # --- Follow-up conversation management ---
+    history: list[dict] | None = None
+    conv_session = None
+
+    if follow_up and conversation_id:
+        conv_session = await conversation_manager.get(conversation_id)
+        if conv_session is None:
+            return {
+                "session_id": session_id,
+                "conversation_id": conversation_id,
+                "content": "会话已过期或不存在，请不带 follow_up 开始新搜索。",
+                "sources_count": 0,
+                "follow_up": False,
+            }
+        history = conv_session.get_history()
+    else:
+        # New conversation
+        conv_session = await conversation_manager.get_or_create()
+        conversation_id = conv_session.session_id
+
+    # Record user message
+    conv_session.add_user_message(query)
 
     # 计算额外信源配额
     has_tavily = bool(config.tavily_api_key)
@@ -173,7 +207,7 @@ async def web_search(
     # 并行执行搜索任务
     async def _safe_grok() -> str:
         try:
-            return await grok_provider.search(query, platform)
+            return await grok_provider.search(query, platform, history=history)
         except Exception:
             return ""
 
@@ -213,8 +247,18 @@ async def web_search(
     extra = _extra_results_to_sources(tavily_results, firecrawl_results)
     all_sources = merge_sources(grok_sources, extra)
 
+    # Record assistant response
+    conv_session.add_assistant_message(answer)
+
     await _SOURCES_CACHE.set(session_id, all_sources)
-    return {"session_id": session_id, "content": answer, "sources_count": len(all_sources)}
+    return {
+        "session_id": session_id,
+        "conversation_id": conversation_id,
+        "content": answer,
+        "sources_count": len(all_sources),
+        "follow_up": True,
+        "search_count": conv_session.search_count,
+    }
 
 
 @mcp.tool(

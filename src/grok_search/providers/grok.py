@@ -125,7 +125,7 @@ class GrokSearchProvider(BaseSearchProvider):
     def get_provider_name(self) -> str:
         return "Grok"
 
-    async def search(self, query: str, platform: str = "", min_results: int = 3, max_results: int = 10, ctx=None) -> List[SearchResult]:
+    async def search(self, query: str, platform: str = "", min_results: int = 3, max_results: int = 10, ctx=None, history: list[dict] | None = None) -> List[SearchResult]:
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
@@ -137,15 +137,22 @@ class GrokSearchProvider(BaseSearchProvider):
 
         time_context = get_local_time_info() + "\n"
 
+        # Build messages array: support multi-turn follow-up
+        if history:
+            # Multi-turn: system + history + new user query
+            messages = [{"role": "system", "content": search_prompt}]
+            messages.extend(history)
+            messages.append({"role": "user", "content": time_context + query + platform_prompt})
+        else:
+            # Single-turn: original behavior
+            messages = [
+                {"role": "system", "content": search_prompt},
+                {"role": "user", "content": time_context + search_prompt + query + platform_prompt},
+            ]
+
         payload = {
             "model": self.model,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": search_prompt,
-                },
-                {"role": "user", "content": time_context + search_prompt + query + platform_prompt},
-            ],
+            "messages": messages,
             "stream": True,
         }
 
