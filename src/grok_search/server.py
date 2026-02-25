@@ -19,8 +19,6 @@ try:
     from grok_search.conversation import conversation_manager
     from grok_search.reflect import ReflectEngine
     from grok_search.planning import (
-        IntentOutput, ComplexityOutput, SubQuery,
-        StrategyOutput, ToolPlanItem, ExecutionOrderOutput,
         engine as planning_engine,
     )
 except ImportError:
@@ -31,8 +29,6 @@ except ImportError:
     from .conversation import conversation_manager
     from .reflect import ReflectEngine
     from .planning import (
-        IntentOutput, ComplexityOutput, SubQuery,
-        StrategyOutput, ToolPlanItem, ExecutionOrderOutput,
         engine as planning_engine,
     )
 
@@ -554,10 +550,10 @@ async def _call_tavily_map(url: str, instructions: str = None, max_depth: int = 
 async def web_map(
     url: Annotated[str, "Root URL to begin the mapping (e.g., 'https://docs.example.com')."],
     instructions: Annotated[str, "Natural language instructions for the crawler to filter or focus on specific content."] = "",
-    max_depth: Annotated[int, Field(description="Maximum depth of mapping from the base URL.", ge=1, le=5)] = 1,
-    max_breadth: Annotated[int, Field(description="Maximum number of links to follow per page.", ge=1, le=500)] = 20,
-    limit: Annotated[int, Field(description="Total number of links to process before stopping.", ge=1, le=500)] = 50,
-    timeout: Annotated[int, Field(description="Maximum time in seconds for the operation.", ge=10, le=150)] = 150
+    max_depth: Annotated[int, "Maximum depth of mapping from the base URL (1-5)."] = 1,
+    max_breadth: Annotated[int, "Maximum number of links to follow per page (1-500)."] = 20,
+    limit: Annotated[int, "Total number of links to process before stopping (1-500)."] = 50,
+    timeout: Annotated[int, "Maximum time in seconds for the operation (10-150)."] = 150
 ) -> str:
     result = await _call_tavily_map(url, instructions, max_depth, max_breadth, limit, timeout)
     return result
@@ -843,26 +839,34 @@ async def search_planning(
     phase: Annotated[str, "Current phase: intent_analysis | complexity_assessment | query_decomposition | search_strategy | tool_selection | execution_order"],
     thought: Annotated[str, "Your reasoning for this phase — explain WHY, not just WHAT"],
     next_phase_needed: Annotated[bool, "true to continue planning, false when done or plan auto-completes"],
-    intent: Optional[IntentOutput] = None,
-    complexity: Optional[ComplexityOutput] = None,
-    sub_queries: Optional[list[SubQuery]] = None,
-    strategy: Optional[StrategyOutput] = None,
-    tool_plan: Optional[list[ToolPlanItem]] = None,
-    execution_order: Optional[ExecutionOrderOutput] = None,
+    intent_json: Annotated[str, "JSON string matching IntentOutput schema"] = "",
+    complexity_json: Annotated[str, "JSON string matching ComplexityOutput schema"] = "",
+    sub_queries_json: Annotated[str, "JSON array of SubQuery objects"] = "",
+    strategy_json: Annotated[str, "JSON string matching StrategyOutput schema"] = "",
+    tool_plan_json: Annotated[str, "JSON array of ToolPlanItem objects"] = "",
+    execution_order_json: Annotated[str, "JSON string matching ExecutionOrderOutput schema"] = "",
     session_id: Annotated[str, "Session ID from previous call. Empty for new session."] = "",
     is_revision: Annotated[bool, "true to revise a previously completed phase"] = False,
     revises_phase: Annotated[str, "Phase name to revise (required if is_revision=true)"] = "",
     confidence: Annotated[float, "Confidence in this phase's output (0.0-1.0)"] = 1.0,
 ) -> str:
     import json
+    
+    def _parse_json(jstr):
+        if not jstr or not jstr.strip():
+            return None
+        try:
+            return json.loads(jstr)
+        except Exception:
+            return None
 
     phase_data_map = {
-        "intent_analysis": intent.model_dump() if intent else None,
-        "complexity_assessment": complexity.model_dump() if complexity else None,
-        "query_decomposition": [sq.model_dump() for sq in sub_queries] if sub_queries else None,
-        "search_strategy": strategy.model_dump() if strategy else None,
-        "tool_selection": [tp.model_dump() for tp in tool_plan] if tool_plan else None,
-        "execution_order": execution_order.model_dump() if execution_order else None,
+        "intent_analysis": _parse_json(intent_json),
+        "complexity_assessment": _parse_json(complexity_json),
+        "query_decomposition": _parse_json(sub_queries_json),
+        "search_strategy": _parse_json(strategy_json),
+        "tool_selection": _parse_json(tool_plan_json),
+        "execution_order": _parse_json(execution_order_json),
     }
 
     target = revises_phase if is_revision and revises_phase else phase
