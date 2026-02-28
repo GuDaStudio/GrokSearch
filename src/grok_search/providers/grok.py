@@ -194,6 +194,7 @@ class GrokSearchProvider(BaseSearchProvider):
 
     async def _parse_streaming_response(self, response, ctx=None) -> str:
         content = ""
+        reasoning_content = ""
         full_body_buffer = [] 
         
         async for line in response.aiter_lines():
@@ -214,24 +215,33 @@ class GrokSearchProvider(BaseSearchProvider):
                     choices = data.get("choices", [])
                     if choices and len(choices) > 0:
                         delta = choices[0].get("delta", {})
-                        if "content" in delta:
+                        if "reasoning_content" in delta and delta["reasoning_content"]:
+                            reasoning_content += delta["reasoning_content"]
+                        if "content" in delta and delta["content"]:
                             content += delta["content"]
                 except (json.JSONDecodeError, IndexError):
                     continue
                 
-        if not content and full_body_buffer:
+        if not content and not reasoning_content and full_body_buffer:
             try:
                 full_text = "".join(full_body_buffer)
                 data = json.loads(full_text)
                 if "choices" in data and len(data["choices"]) > 0:
                     message = data["choices"][0].get("message", {})
-                    content = message.get("content", "")
+                    if "reasoning_content" in message and message["reasoning_content"]:
+                        reasoning_content = message.get("reasoning_content", "")
+                    if "content" in message and message["content"]:
+                        content = message.get("content", "")
             except json.JSONDecodeError:
                 pass
         
-        await log_info(ctx, f"content: {content}", config.debug_enabled)
+        final_content = content
+        if reasoning_content:
+            final_content = f"<think>\n{reasoning_content}\n</think>\n\n{content}"
 
-        return content
+        await log_info(ctx, f"content: {final_content}", config.debug_enabled)
+
+        return final_content
 
     async def _execute_stream_with_retry(self, headers: dict, payload: dict, ctx=None) -> str:
         """执行带重试机制的流式 HTTP 请求"""

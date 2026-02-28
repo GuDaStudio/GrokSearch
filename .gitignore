@@ -15,6 +15,13 @@ build/
 logs/
 *.log
 
+# Local runtime/config artifacts
+.config/
+.pytest_cache/
+tool_test_report_*.md
+output.txt
+schema_out*.json
+
 # Test outputs
 test_output.*
 test_cqnu*
@@ -31,3 +38,4 @@ test_new_tools_output.json
 # OS
 .DS_Store
 Thumbs.db
+.ace-tool/

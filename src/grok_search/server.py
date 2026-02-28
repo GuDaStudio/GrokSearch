@@ -164,11 +164,14 @@ async def _execute_search(
         return {"error": "config_error", "message": f"配置错误: {str(e)}", "session_id": session_id, "conversation_id": "", "content": "", "sources_count": 0}
 
     effective_model = config.grok_model
+    model_validation_warning = ""
     if model:
         available = await _get_available_models_cached(api_url, api_key)
         if available and model not in available:
-            await _SOURCES_CACHE.set(session_id, [])
-            return {"error": "invalid_model", "message": f"无效模型: {model}", "session_id": session_id, "conversation_id": "", "content": "", "sources_count": 0}
+            if config.strict_model_validation:
+                await _SOURCES_CACHE.set(session_id, [])
+                return {"error": "invalid_model", "message": f"无效模型: {model}", "session_id": session_id, "conversation_id": "", "content": "", "sources_count": 0}
+            model_validation_warning = f"模型 {model} 不在 /models 列表中，已按非严格模式继续请求。"
         effective_model = model
 
     grok_provider = GrokSearchProvider(api_url, api_key, effective_model)
@@ -198,11 +201,11 @@ async def _execute_search(
             tavily_count = extra_sources
 
     # 并行执行搜索任务
-    async def _safe_grok() -> str:
+    async def _safe_grok() -> str | Exception:
         try:
             return await grok_provider.search(query, platform, history=history)
-        except Exception:
-            return ""
+        except Exception as e:
+            return e
 
     async def _safe_tavily() -> list[dict] | None:
         try:
@@ -226,7 +229,19 @@ async def _execute_search(
 
     gathered = await asyncio.gather(*coros)
 
-    grok_result: str = gathered[0] or ""
+    grok_result_or_error = gathered[0]
+    if isinstance(grok_result_or_error, Exception):
+        await _SOURCES_CACHE.set(session_id, [])
+        return {
+            "error": "search_error",
+            "message": f"Grok 搜索失败: {str(grok_result_or_error)}",
+            "session_id": session_id,
+            "conversation_id": conversation_id,
+            "content": "",
+            "sources_count": 0,
+        }
+
+    grok_result: str = grok_result_or_error or ""
     tavily_results: list[dict] | None = None
     firecrawl_results: list[dict] | None = None
     idx = 1
@@ -243,12 +258,15 @@ async def _execute_search(
     conv_session.add_assistant_message(answer)
 
     await _SOURCES_CACHE.set(session_id, all_sources)
-    return {
+    result = {
         "session_id": session_id,
         "conversation_id": conversation_id,
         "content": answer,
         "sources_count": len(all_sources),
     }
+    if model_validation_warning:
+        result["warning"] = model_validation_warning
+    return result
 
 
 @mcp.tool(

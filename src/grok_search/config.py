@@ -64,6 +64,10 @@ class Config:
         return int(os.getenv("GROK_RETRY_MAX_WAIT", "10"))
 
     @property
+    def strict_model_validation(self) -> bool:
+        return os.getenv("GROK_STRICT_MODEL_VALIDATION", "false").lower() in ("true", "1", "yes")
+
+    @property
     def grok_api_url(self) -> str:
         url = os.getenv("GROK_API_URL")
         if not url:
@@ -180,6 +184,7 @@ class Config:
             "GROK_API_URL": api_url,
             "GROK_API_KEY": api_key_masked,
             "GROK_MODEL": self.grok_model,
+            "GROK_STRICT_MODEL_VALIDATION": self.strict_model_validation,
             "GROK_DEBUG": self.debug_enabled,
             "GROK_LOG_LEVEL": self.log_level,
             "GROK_LOG_DIR": str(self.log_dir),

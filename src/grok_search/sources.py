@@ -11,6 +11,7 @@ from .utils import extract_unique_urls
 
 
 _MD_LINK_PATTERN = re.compile(r"\[([^\]]+)\]\((https?://[^)]+)\)")
+_THINK_PREFIX_PATTERN = re.compile(r"(?is)^<think>\s*.*?\s*</think>")
 _SOURCES_HEADING_PATTERN = re.compile(
     r"(?im)^"
     r"(?:#{1,6}\s*)?"
@@ -72,23 +73,49 @@ def split_answer_and_sources(text: str) -> tuple[str, list[dict]]:
     if not raw:
         return "", []
 
-    split = _split_function_call_sources(raw)
-    if split:
-        return split
+    think_prefix, content = _extract_leading_think(raw)
+    if think_prefix and not content:
+        return think_prefix, []
 
-    split = _split_heading_sources(raw)
+    split = _split_function_call_sources(content)
     if split:
-        return split
+        return _rebuild_answer_with_think(think_prefix, split)
 
-    split = _split_details_block_sources(raw)
+    split = _split_heading_sources(content)
     if split:
-        return split
+        return _rebuild_answer_with_think(think_prefix, split)
 
-    split = _split_tail_link_block(raw)
+    split = _split_details_block_sources(content)
     if split:
-        return split
+        return _rebuild_answer_with_think(think_prefix, split)
 
-    return raw, []
+    split = _split_tail_link_block(content)
+    if split:
+        return _rebuild_answer_with_think(think_prefix, split)
+
+    # Fallback: model may include URLs inline without a dedicated Sources block.
+    # In that case, keep the answer unchanged and still extract URLs for get_sources.
+    fallback_sources = _extract_sources_from_text(content)
+    return _rebuild_answer_with_think(think_prefix, (content, fallback_sources))
+
+
+def _extract_leading_think(text: str) -> tuple[str, str]:
+    m = _THINK_PREFIX_PATTERN.match(text or "")
+    if not m:
+        return "", text
+    think_block = m.group(0).strip()
+    body = text[m.end() :].lstrip()
+    return think_block, body
+
+
+def _rebuild_answer_with_think(think_prefix: str, split: tuple[str, list[dict]]) -> tuple[str, list[dict]]:
+    answer, sources = split
+    answer = (answer or "").strip()
+    if not think_prefix:
+        return answer, sources
+    if answer:
+        return f"{think_prefix}\n\n{answer}", sources
+    return think_prefix, sources
 
 
 def _split_function_call_sources(text: str) -> tuple[str, list[dict]] | None:
