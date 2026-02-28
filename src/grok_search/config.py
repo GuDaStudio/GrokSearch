@@ -100,30 +100,33 @@ class Config:
         user_log_dir.mkdir(parents=True, exist_ok=True)
         return user_log_dir
 
+    def _apply_model_suffix(self, model: str) -> str:
+        try:
+            url = self.grok_api_url
+        except ValueError:
+            return model
+        if "openrouter" in url and ":online" not in model:
+            return f"{model}:online"
+        return model
+
     @property
     def grok_model(self) -> str:
         if self._cached_model is not None:
             return self._cached_model
 
-        env_model = os.getenv("GROK_MODEL")
-        if env_model:
-            self._cached_model = env_model
-            return env_model
-
-        config_data = self._load_config_file()
-        file_model = config_data.get("model")
-        if file_model:
-            self._cached_model = file_model
-            return file_model
-
-        self._cached_model = self._DEFAULT_MODEL
-        return self._DEFAULT_MODEL
+        model = (
+            os.getenv("GROK_MODEL")
+            or self._load_config_file().get("model")
+            or self._DEFAULT_MODEL
+        )
+        self._cached_model = self._apply_model_suffix(model)
+        return self._cached_model
 
     def set_model(self, model: str) -> None:
         config_data = self._load_config_file()
         config_data["model"] = model
         self._save_config_file(config_data)
-        self._cached_model = model
+        self._cached_model = self._apply_model_suffix(model)
 
     @staticmethod
     def _mask_api_key(key: str) -> str:
