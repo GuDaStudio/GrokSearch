@@ -144,7 +144,7 @@ class GrokSearchProvider(BaseSearchProvider):
                     "role": "system",
                     "content": search_prompt,
                 },
-                {"role": "user", "content": time_context + search_prompt + query + platform_prompt},
+                {"role": "user", "content": time_context + query + platform_prompt},
             ],
             "stream": True,
         }
