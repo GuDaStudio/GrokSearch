@@ -74,29 +74,34 @@ def split_answer_and_sources(text: str) -> tuple[str, list[dict]]:
         return "", []
 
     think_prefix, content = _extract_leading_think(raw)
+    think_sources = _extract_sources_from_text(think_prefix) if think_prefix else []
     if think_prefix and not content:
-        return think_prefix, []
+        return think_prefix, think_sources
 
     split = _split_function_call_sources(content)
     if split:
-        return _rebuild_answer_with_think(think_prefix, split)
+        answer, sources = split
+        return _rebuild_answer_with_think(think_prefix, (answer, merge_sources(sources, think_sources)))
 
     split = _split_heading_sources(content)
     if split:
-        return _rebuild_answer_with_think(think_prefix, split)
+        answer, sources = split
+        return _rebuild_answer_with_think(think_prefix, (answer, merge_sources(sources, think_sources)))
 
     split = _split_details_block_sources(content)
     if split:
-        return _rebuild_answer_with_think(think_prefix, split)
+        answer, sources = split
+        return _rebuild_answer_with_think(think_prefix, (answer, merge_sources(sources, think_sources)))
 
     split = _split_tail_link_block(content)
     if split:
-        return _rebuild_answer_with_think(think_prefix, split)
+        answer, sources = split
+        return _rebuild_answer_with_think(think_prefix, (answer, merge_sources(sources, think_sources)))
 
     # Fallback: model may include URLs inline without a dedicated Sources block.
     # In that case, keep the answer unchanged and still extract URLs for get_sources.
     fallback_sources = _extract_sources_from_text(content)
-    return _rebuild_answer_with_think(think_prefix, (content, fallback_sources))
+    return _rebuild_answer_with_think(think_prefix, (content, merge_sources(fallback_sources, think_sources)))
 
 
 def _extract_leading_think(text: str) -> tuple[str, str]:
