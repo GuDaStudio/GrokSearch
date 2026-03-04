@@ -45,7 +45,7 @@ async def _fetch_available_models(api_url: str, api_key: str) -> list[str]:
     import httpx
 
     models_url = f"{api_url.rstrip('/')}/models"
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with httpx.AsyncClient(timeout=10.0, verify=config.ssl_verify_enabled) as client:
         response = await client.get(
             models_url,
             headers={
@@ -250,7 +250,7 @@ async def _call_tavily_extract(url: str) -> str | None:
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     body = {"urls": [url], "format": "markdown"}
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=60.0, verify=config.ssl_verify_enabled) as client:
             response = await client.post(endpoint, headers=headers, json=body)
             response.raise_for_status()
             data = response.json()
@@ -277,7 +277,7 @@ async def _call_tavily_search(query: str, max_results: int = 6) -> list[dict] | 
         "include_answer": False,
     }
     try:
-        async with httpx.AsyncClient(timeout=90.0) as client:
+        async with httpx.AsyncClient(timeout=90.0, verify=config.ssl_verify_enabled) as client:
             response = await client.post(endpoint, headers=headers, json=body)
             response.raise_for_status()
             data = response.json()
@@ -299,7 +299,7 @@ async def _call_firecrawl_search(query: str, limit: int = 14) -> list[dict] | No
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     body = {"query": query, "limit": limit}
     try:
-        async with httpx.AsyncClient(timeout=90.0) as client:
+        async with httpx.AsyncClient(timeout=90.0, verify=config.ssl_verify_enabled) as client:
             response = await client.post(endpoint, headers=headers, json=body)
             response.raise_for_status()
             data = response.json()
@@ -329,7 +329,7 @@ async def _call_firecrawl_scrape(url: str, ctx=None) -> str | None:
             "waitFor": (attempt + 1) * 1500,
         }
         try:
-            async with httpx.AsyncClient(timeout=90.0) as client:
+            async with httpx.AsyncClient(timeout=90.0, verify=config.ssl_verify_enabled) as client:
                 response = await client.post(endpoint, headers=headers, json=body)
                 response.raise_for_status()
                 data = response.json()
@@ -397,7 +397,7 @@ async def _call_tavily_map(url: str, instructions: str = None, max_depth: int = 
     if instructions:
         body["instructions"] = instructions
     try:
-        async with httpx.AsyncClient(timeout=float(timeout + 10)) as client:
+        async with httpx.AsyncClient(timeout=float(timeout + 10), verify=config.ssl_verify_enabled) as client:
             response = await client.post(endpoint, headers=headers, json=body)
             response.raise_for_status()
             data = response.json()
@@ -484,7 +484,7 @@ async def get_config_info() -> str:
         import time
         start_time = time.time()
 
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=10.0, verify=config.ssl_verify_enabled) as client:
             response = await client.get(
                 models_url,
                 headers={

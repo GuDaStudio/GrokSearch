@@ -108,6 +108,11 @@ class Config:
         return os.getenv("GROK_LOG_LEVEL", "INFO").upper()
 
     @property
+    def ssl_verify_enabled(self) -> bool:
+        """是否启用 SSL 证书验证，默认启用。设置为 false 可跳过验证（适用于内网自签名证书）"""
+        return os.getenv("GROK_SSL_VERIFY", "true").lower() not in ("false", "0", "no")
+
+    @property
     def log_dir(self) -> Path:
         log_dir_str = os.getenv("GROK_LOG_DIR", "logs")
         log_dir = Path(log_dir_str)
@@ -182,6 +187,7 @@ class Config:
             "GROK_MODEL": self.grok_model,
             "GROK_DEBUG": self.debug_enabled,
             "GROK_LOG_LEVEL": self.log_level,
+            "GROK_SSL_VERIFY": self.ssl_verify_enabled,
             "GROK_LOG_DIR": str(self.log_dir),
             "TAVILY_API_URL": self.tavily_api_url,
             "TAVILY_ENABLED": self.tavily_enabled,
