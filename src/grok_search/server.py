@@ -71,6 +71,26 @@ async def _get_available_models_cached(api_url: str, api_key: str) -> list[str]:
     return models
 
 
+def _planning_session_error(session_id: str) -> str:
+    import json
+    return json.dumps(
+        {
+            "error": "session_not_found",
+            "message": f"Session '{session_id}' not found. Call plan_intent first.",
+            "expected_phase_order": [
+                "intent_analysis",
+                "complexity_assessment",
+                "query_decomposition",
+                "search_strategy",
+                "tool_selection",
+                "execution_order",
+            ],
+            "restart_from_intent_analysis": True,
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+
 def _extra_results_to_sources(
     tavily_results: list[dict] | None,
     firecrawl_results: list[dict] | None,
@@ -208,7 +228,6 @@ async def web_search(
 
     await _SOURCES_CACHE.set(session_id, all_sources)
     return {"session_id": session_id, "content": answer, "sources_count": len(all_sources)}
-
 
 @mcp.tool(
     name="get_sources",
@@ -713,7 +732,7 @@ async def plan_complexity(
 ) -> str:
     import json
     if not planning_engine.get_session(session_id):
-        return json.dumps({"error": f"Session '{session_id}' not found. Call plan_intent first."})
+        return _planning_session_error(session_id)
     return json.dumps(planning_engine.process_phase(
         phase="complexity_assessment", thought=thought, session_id=session_id,
         is_revision=is_revision, confidence=confidence,
@@ -741,7 +760,7 @@ async def plan_sub_query(
 ) -> str:
     import json
     if not planning_engine.get_session(session_id):
-        return json.dumps({"error": f"Session '{session_id}' not found. Call plan_intent first."})
+        return _planning_session_error(session_id)
     item = {"id": id, "goal": goal, "expected_output": expected_output, "boundary": boundary}
     if depends_on:
         item["depends_on"] = _split_csv(depends_on)
@@ -771,7 +790,7 @@ async def plan_search_term(
 ) -> str:
     import json
     if not planning_engine.get_session(session_id):
-        return json.dumps({"error": f"Session '{session_id}' not found. Call plan_intent first."})
+        return _planning_session_error(session_id)
     data = {"search_terms": [{"term": term, "purpose": purpose, "round": round}]}
     if approach:
         data["approach"] = approach
@@ -800,7 +819,7 @@ async def plan_tool_mapping(
 ) -> str:
     import json
     if not planning_engine.get_session(session_id):
-        return json.dumps({"error": f"Session '{session_id}' not found. Call plan_intent first."})
+        return _planning_session_error(session_id)
     item = {"sub_query_id": sub_query_id, "tool": tool, "reason": reason}
     if params_json:
         try:
@@ -829,7 +848,7 @@ async def plan_execution(
 ) -> str:
     import json
     if not planning_engine.get_session(session_id):
-        return json.dumps({"error": f"Session '{session_id}' not found. Call plan_intent first."})
+        return _planning_session_error(session_id)
     parallel = [_split_csv(g) for g in parallel_groups.split(";") if g.strip()] if parallel_groups else []
     seq = _split_csv(sequential)
     return json.dumps(planning_engine.process_phase(

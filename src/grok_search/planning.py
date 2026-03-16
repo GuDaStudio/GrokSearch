@@ -84,6 +84,13 @@ REQUIRED_PHASES: dict[int, set[str]] = {
 
 _ACCUMULATIVE_LIST_PHASES = {"query_decomposition", "tool_selection"}
 _MERGE_STRATEGY_PHASE = "search_strategy"
+_PHASE_PREDECESSORS = {
+    "complexity_assessment": "intent_analysis",
+    "query_decomposition": "complexity_assessment",
+    "search_strategy": "query_decomposition",
+    "tool_selection": "search_strategy",
+    "execution_order": "tool_selection",
+}
 
 
 def _split_csv(value: str) -> list[str]:
@@ -126,6 +133,9 @@ class PlanningEngine:
     def get_session(self, session_id: str) -> PlanningSession | None:
         return self._sessions.get(session_id)
 
+    def reset(self) -> None:
+        self._sessions.clear()
+
     def process_phase(
         self,
         phase: str,
@@ -146,6 +156,35 @@ class PlanningEngine:
         target = revises_phase if is_revision and revises_phase else phase
         if target not in PHASE_NAMES:
             return {"error": f"Unknown phase: {target}. Valid: {', '.join(PHASE_NAMES)}"}
+
+        if not is_revision:
+            predecessor = _PHASE_PREDECESSORS.get(target)
+            if predecessor and predecessor not in session.phases:
+                return {
+                    "error": f"Phase '{target}' requires '{predecessor}' to be completed first.",
+                    "expected_phase_order": PHASE_NAMES,
+                    "session_id": session.session_id,
+                    "completed_phases": session.completed_phases,
+                    "complexity_level": session.complexity_level,
+                }
+
+            if session.complexity_level == 1 and target in {"search_strategy", "tool_selection", "execution_order"}:
+                return {
+                    "error": "Level 1 planning completes after query_decomposition.",
+                    "expected_phase_order": PHASE_NAMES,
+                    "session_id": session.session_id,
+                    "completed_phases": session.completed_phases,
+                    "complexity_level": session.complexity_level,
+                }
+
+            if session.complexity_level == 2 and target == "execution_order":
+                return {
+                    "error": "Level 2 planning completes after tool_selection.",
+                    "expected_phase_order": PHASE_NAMES,
+                    "session_id": session.session_id,
+                    "completed_phases": session.completed_phases,
+                    "complexity_level": session.complexity_level,
+                }
 
         if target in _ACCUMULATIVE_LIST_PHASES:
             if is_revision:

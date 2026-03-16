@@ -7,6 +7,7 @@ from typing import Any
 
 import asyncio
 
+from .config import config
 from .utils import extract_unique_urls
 
 
@@ -22,6 +23,41 @@ _SOURCES_HEADING_PATTERN = re.compile(
 )
 _SOURCES_FUNCTION_PATTERN = re.compile(
     r"(?im)(^|\n)\s*(sources|source|citations|citation|references|reference|citation_card|source_cards|source_card)\s*\("
+)
+_THINK_BLOCK_PATTERN = re.compile(r"(?is)<think>.*?</think>")
+_LEADING_POLICY_PATTERNS = [
+    re.compile(r"(?is)^\s*\**\s*i cannot comply\b.*"),
+    re.compile(r"(?is)^\s*\**\s*i do not accept\b.*"),
+    re.compile(r"(?is)^\s*\**\s*refusal\s*[:：].*"),
+    re.compile(r"(?is)^\s*\**\s*refuse to\b.*"),
+    re.compile(r"(?is)^\s*\**\s*rejected?\b.*"),
+    re.compile(r"(?is)^\s*\**\s*拒绝执行\b.*"),
+    re.compile(r"(?is)^\s*\**\s*无法遵循\b.*"),
+]
+_POLICY_META_KEYWORDS = (
+    "cannot comply",
+    "refuse",
+    "refusal",
+    "override my core",
+    "core behavior",
+    "custom rules",
+    "用户提供的自定义",
+    "覆盖我的核心",
+    "核心行为",
+    "拒绝执行",
+    "无法遵循",
+)
+_POLICY_CONTEXT_KEYWORDS = (
+    "jailbreak",
+    "prompt injection",
+    "system instructions",
+    "system prompt",
+    "user-injected",
+    "注入",
+    "越狱",
+    "系统指令",
+    "系统提示",
+    "自定义“system”",
 )
 
 
@@ -72,6 +108,11 @@ def split_answer_and_sources(text: str) -> tuple[str, list[dict]]:
     if not raw:
         return "", []
 
+    if config.output_cleanup_enabled:
+        cleaned = sanitize_answer_text(raw)
+        if cleaned:
+            raw = cleaned
+
     split = _split_function_call_sources(raw)
     if split:
         return split
@@ -89,6 +130,43 @@ def split_answer_and_sources(text: str) -> tuple[str, list[dict]]:
         return split
 
     return raw, []
+
+
+def sanitize_answer_text(text: str) -> str:
+    raw = (text or "").strip()
+    if not raw:
+        return ""
+
+    cleaned = _THINK_BLOCK_PATTERN.sub("", raw).strip()
+    paragraphs = _split_paragraphs(cleaned)
+    filtered = [paragraph for paragraph in paragraphs if not _looks_like_policy_block(paragraph)]
+    if filtered:
+        return "\n\n".join(filtered).strip()
+    return cleaned
+
+
+def _split_paragraphs(text: str) -> list[str]:
+    parts = [part.strip() for part in re.split(r"\n\s*\n", text) if part.strip()]
+    return parts or ([text.strip()] if text.strip() else [])
+
+
+def _looks_like_policy_block(text: str) -> bool:
+    normalized = _normalize_policy_text(text)
+    if not normalized:
+        return False
+
+    if any(pattern.match(normalized) for pattern in _LEADING_POLICY_PATTERNS):
+        return True
+
+    return any(keyword in normalized for keyword in _POLICY_META_KEYWORDS) and any(
+        keyword in normalized for keyword in _POLICY_CONTEXT_KEYWORDS
+    )
+
+
+def _normalize_policy_text(text: str) -> str:
+    normalized = re.sub(r"[>*_`#-]+", " ", text or "")
+    normalized = re.sub(r"\s+", " ", normalized)
+    return normalized.strip().lower()
 
 
 def _split_function_call_sources(text: str) -> tuple[str, list[dict]] | None:

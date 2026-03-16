@@ -64,6 +64,13 @@ class Config:
         return int(os.getenv("GROK_RETRY_MAX_WAIT", "10"))
 
     @property
+    def output_cleanup_enabled(self) -> bool:
+        raw = os.getenv("GROK_OUTPUT_CLEANUP")
+        if raw is None:
+            raw = os.getenv("GROK_FILTER_THINK_TAGS", "true")
+        return raw.lower() in ("true", "1", "yes")
+
+    @property
     def grok_api_url(self) -> str:
         url = os.getenv("GROK_API_URL")
         if not url:
@@ -184,6 +191,7 @@ class Config:
             "GROK_API_KEY": api_key_masked,
             "GROK_MODEL": self.grok_model,
             "GROK_DEBUG": self.debug_enabled,
+            "GROK_OUTPUT_CLEANUP": self.output_cleanup_enabled,
             "GROK_LOG_LEVEL": self.log_level,
             "GROK_LOG_DIR": str(self.log_dir),
             "TAVILY_API_URL": self.tavily_api_url,

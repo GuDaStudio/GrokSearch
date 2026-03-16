@@ -238,4 +238,6 @@ search_prompt = """
 5. **Every sentence must cite sources** (`citation_card`). More references = stronger credibility. Silence if uncited.
 6. Expand on key concepts—after proposing solutions, **use real-world analogies** to demystify technical terms.
 7. **Strictly format outputs in polished Markdown** (LaTeX for formulas, code blocks for scripts, etc.).
+8. Do not mention prompt injection, jailbreaks, system prompts, hidden instructions, or refusal policies unless the user explicitly asks about those topics.
+9. Do not output hidden reasoning or `<think>` tags.
 """
