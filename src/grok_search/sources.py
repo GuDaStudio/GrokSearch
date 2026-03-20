@@ -23,6 +23,10 @@ _SOURCES_HEADING_PATTERN = re.compile(
 _SOURCES_FUNCTION_PATTERN = re.compile(
     r"(?im)(^|\n)\s*(sources|source|citations|citation|references|reference|citation_card|source_cards|source_card)\s*\("
 )
+_THINK_TAG_PATTERN = re.compile(
+    r"<think\b[^>]*>.*?</think>",
+    re.IGNORECASE | re.DOTALL,
+)
 
 
 def new_session_id() -> str:
@@ -65,6 +69,16 @@ def merge_sources(*source_lists: list[dict]) -> list[dict]:
             seen.add(url)
             merged.append(item)
     return merged
+
+
+def sanitize_answer_text(text: str) -> str:
+    """Remove model reasoning tags from answer text while preserving content."""
+    raw = (text or "").strip()
+    if not raw:
+        return ""
+    cleaned = _THINK_TAG_PATTERN.sub("", raw)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+    return cleaned
 
 
 def split_answer_and_sources(text: str) -> tuple[str, list[dict]]:

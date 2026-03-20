@@ -15,13 +15,13 @@ try:
     from grok_search.providers.grok import GrokSearchProvider
     from grok_search.logger import log_info
     from grok_search.config import config
-    from grok_search.sources import SourcesCache, merge_sources, new_session_id, split_answer_and_sources
+    from grok_search.sources import SourcesCache, merge_sources, new_session_id, sanitize_answer_text, split_answer_and_sources
     from grok_search.planning import engine as planning_engine, _split_csv
 except ImportError:
     from .providers.grok import GrokSearchProvider
     from .logger import log_info
     from .config import config
-    from .sources import SourcesCache, merge_sources, new_session_id, split_answer_and_sources
+    from .sources import SourcesCache, merge_sources, new_session_id, sanitize_answer_text, split_answer_and_sources
     from .planning import engine as planning_engine, _split_csv
 
 import asyncio
@@ -203,6 +203,7 @@ async def web_search(
         firecrawl_results = gathered[idx]
 
     answer, grok_sources = split_answer_and_sources(grok_result)
+    answer = sanitize_answer_text(answer)
     extra = _extra_results_to_sources(tavily_results, firecrawl_results)
     all_sources = merge_sources(grok_sources, extra)
 
