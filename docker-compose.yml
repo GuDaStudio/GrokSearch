@@ -1,0 +1,34 @@
+services:
+  grok-search:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: grok-search
+    restart: unless-stopped
+    ports:
+      - "${MCP_PORT:-8000}:8000"
+    environment:
+      # Required
+      - GROK_API_URL=${GROK_API_URL}
+      - GROK_API_KEY=${GROK_API_KEY}
+      # Optional MCP transport settings
+      - MCP_TRANSPORT=${MCP_TRANSPORT:-http}
+      - MCP_HOST=0.0.0.0
+      - MCP_PORT=8000
+      - MCP_AUTH_TOKEN=${MCP_AUTH_TOKEN:-}
+      # Optional Grok settings
+      - GROK_MODEL=${GROK_MODEL:-grok-4-fast}
+      - GROK_DEBUG=${GROK_DEBUG:-false}
+      - GROK_LOG_LEVEL=${GROK_LOG_LEVEL:-INFO}
+      # Optional search providers
+      - TAVILY_ENABLED=${TAVILY_ENABLED:-true}
+      - TAVILY_API_URL=${TAVILY_API_URL:-https://api.tavily.com}
+      - TAVILY_API_KEY=${TAVILY_API_KEY:-}
+      - FIRECRAWL_API_URL=${FIRECRAWL_API_URL:-https://api.firecrawl.dev/v2}
+      - FIRECRAWL_API_KEY=${FIRECRAWL_API_KEY:-}
+    # Uncomment if you want switch_model persistence across restarts
+    # volumes:
+    #   - grok-search-config:/home/appuser/.config/grok-search
+
+# volumes:
+#   grok-search-config:
