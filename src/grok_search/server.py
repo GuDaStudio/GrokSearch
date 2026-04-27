@@ -25,8 +25,26 @@ except ImportError:
     from .planning import engine as planning_engine, _split_csv
 
 import asyncio
+import os
 
-mcp = FastMCP("grok-search")
+_mcp_auth_token = os.getenv("MCP_AUTH_TOKEN")
+_auth = None
+if _mcp_auth_token:
+    from fastmcp.server.auth.auth import TokenVerifier, AccessToken
+
+    class _StaticBearerAuth(TokenVerifier):
+        def __init__(self, token: str):
+            self._token = token
+            super().__init__()
+
+        async def verify_token(self, token: str) -> AccessToken | None:
+            if token == self._token:
+                return AccessToken(token=token, client_id="grok-search", scopes=[])
+            return None
+
+    _auth = _StaticBearerAuth(_mcp_auth_token)
+
+mcp = FastMCP("grok-search", auth=_auth)
 
 _SOURCES_CACHE = SourcesCache(max_size=256)
 _AVAILABLE_MODELS_CACHE: dict[tuple[str, str], list[str]] = {}
@@ -844,6 +862,10 @@ def main():
     import os
     import threading
 
+    transport = os.getenv("MCP_TRANSPORT", "stdio").strip().lower()
+    host = os.getenv("MCP_HOST", "127.0.0.1")
+    port = int(os.getenv("MCP_PORT", "8000"))
+
     # 信号处理（仅主线程）
     if threading.current_thread() is threading.main_thread():
         def handle_shutdown(signum, frame):
@@ -880,7 +902,10 @@ def main():
         threading.Thread(target=monitor_parent, daemon=True).start()
 
     try:
-        mcp.run(transport="stdio", show_banner=False)
+        if transport in {"http", "streamable-http", "sse"}:
+            mcp.run(transport=transport, host=host, port=port, show_banner=False)
+        else:
+            mcp.run(transport="stdio", show_banner=False)
     except KeyboardInterrupt:
         pass
     finally:

@@ -1,0 +1,14 @@
+.git
+.gitignore
+images/
+docs/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+env/
+logs/
+*.log
+.DS_Store
