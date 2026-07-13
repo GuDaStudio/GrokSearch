@@ -65,6 +65,14 @@ class Config:
         return int(os.getenv("GROK_RETRY_MAX_WAIT", "10"))
 
     @property
+    def read_timeout(self) -> float:
+        return float(os.getenv("GROK_READ_TIMEOUT", "300"))
+
+    @property
+    def connect_timeout(self) -> float:
+        return float(os.getenv("GROK_CONNECT_TIMEOUT", "6"))
+
+    @property
     def guda_base_url(self) -> str:
         return os.getenv("GUDA_BASE_URL", self._DEFAULT_GUDA_BASE_URL)
 
