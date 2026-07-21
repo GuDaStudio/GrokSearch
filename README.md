@@ -20,6 +20,7 @@ Grok Search MCP 是一个基于 [FastMCP](https://github.com/jlowin/fastmcp) 构
 ```
 Claude ──MCP──► Grok Search Server
                   ├─ web_search  ───► Grok API（AI 搜索）
+                  │                    + optional extras: Tavily Search + Firecrawl Search
                   ├─ web_fetch   ───► Tavily Extract → Firecrawl Scrape（内容抓取，自动降级）
                   └─ web_map     ───► Tavily Map（站点映射）
 ```
@@ -27,6 +28,7 @@ Claude ──MCP──► Grok Search Server
 ### 功能特性
 
 - **双引擎**：Grok 搜索 + Tavily 抓取/映射，互补协作
+- **web_search extras**：`extra_sources>0` 时在 Tavily Search 与 Firecrawl Search 之间按比例分配（`GUDA_API_KEY` 同时派生两者时 **不会** 把全部配额给 Firecrawl）；`extra_sources=0`（默认）仅 Grok
 - **Firecrawl 托底**：Tavily 提取失败时自动降级到 Firecrawl Scrape，支持空内容自动重试
 - **OpenAI 兼容接口**，支持任意 Grok 镜像站
 - **自动时间注入**（检测时间相关查询，注入本地时间上下文）
@@ -84,11 +86,12 @@ claude mcp add-json grok-search --scope user '{
   "command": "uvx",
   "args": [
     "--from",
-    "git+https://github.com/GuDaStudio/GrokSearch@grok-with-tavily",
+    "git+https://github.com/karlorz/GrokSearch@grok-with-tavily",
     "grok-search"
   ],
   "env": {
-    "GUDA_API_KEY": "your-guda-api-key"
+    "GUDA_API_KEY": "your-guda-api-key",
+    "GUDA_BASE_URL": "https://search.karldigi.dev"
   }
 }'
 ```
@@ -103,7 +106,7 @@ claude mcp add-json grok-search --scope user '{
   "command": "uvx",
   "args": [
     "--from",
-    "git+https://github.com/GuDaStudio/GrokSearch@grok-with-tavily",
+    "git+https://github.com/karlorz/GrokSearch@grok-with-tavily",
     "grok-search"
   ],
   "env": {
@@ -130,7 +133,7 @@ claude mcp add-json grok-search --scope user '{
   "args": [
     "--native-tls",
     "--from",
-    "git+https://github.com/GuDaStudio/GrokSearch@grok-with-tavily",
+    "git+https://github.com/karlorz/GrokSearch@grok-with-tavily",
     "grok-search"
   ],
   "env": {
@@ -150,9 +153,10 @@ claude mcp add-json grok-search --scope user '{
 | `GROK_MODEL` | ❌ | `grok-4.20-beta` | 默认模型（设置后优先于 `~/.config/grok-search/config.json`） |
 | `TAVILY_API_KEY` | ❌ | `{GUDA_API_KEY}` | Tavily API 密钥（用于 web_fetch / web_map） |
 | `TAVILY_API_URL` | ❌ | `{GUDA_BASE_URL}/tavily` | Tavily API 地址 |
-| `TAVILY_ENABLED` | ❌ | `true` | 是否启用 Tavily |
+| `TAVILY_ENABLED` | ❌ | `true` | 是否启用 Tavily（search extras / extract / map） |
 | `FIRECRAWL_API_KEY` | ❌ | `{GUDA_API_KEY}` | Firecrawl API 密钥（Tavily 失败时托底） |
 | `FIRECRAWL_API_URL` | ❌ | `{GUDA_BASE_URL}/firecrawl` | Firecrawl API 地址 |
+| `FIRECRAWL_ENABLED` | ❌ | `true` | 是否启用 Firecrawl（search extras / scrape 托底） |
 | `GROK_DEBUG` | ❌ | `false` | 调试模式 |
 | `GROK_LOG_LEVEL` | ❌ | `INFO` | 日志级别 |
 | `GROK_LOG_DIR` | ❌ | `logs` | 日志目录 |
@@ -161,6 +165,16 @@ claude mcp add-json grok-search --scope user '{
 | `GROK_RETRY_MAX_WAIT` | ❌ | `10` | 重试最大等待秒数 |
 
 > **注意**：配置了 `GUDA_API_KEY` 后，`GROK_API_URL`/`GROK_API_KEY`/`TAVILY_*`/`FIRECRAWL_*` 均为可选，系统自动从 `GUDA_BASE_URL` 派生。显式设置的独立变量优先级更高。
+
+### web_search extras 分配（`extra_sources`）
+
+| `extra_sources` | 双方均启用 | 说明 |
+|-----------------|------------|------|
+| `0`（默认） | — | 仅 Grok |
+| `1` | Tavily=1, Firecrawl=0 | 单条 extras 优先 Tavily |
+| `≥2` | 约 30% Tavily / 70% Firecrawl | 双方均启用时 **Tavily 份额不为 0** |
+
+关闭一侧：`TAVILY_ENABLED=false` → extras 全给 Firecrawl；`FIRECRAWL_ENABLED=false` → extras 全给 Tavily。
 
 
 ### 验证安装

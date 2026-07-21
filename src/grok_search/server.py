@@ -15,12 +15,14 @@ try:
     from grok_search.providers.grok import GrokSearchProvider
     from grok_search.logger import log_info
     from grok_search.config import config
+    from grok_search.extras import allocate_extra_sources
     from grok_search.sources import SourcesCache, merge_sources, new_session_id, split_answer_and_sources
     from grok_search.planning import engine as planning_engine, _split_csv
 except ImportError:
     from .providers.grok import GrokSearchProvider
     from .logger import log_info
     from .config import config
+    from .extras import allocate_extra_sources
     from .sources import SourcesCache, merge_sources, new_session_id, split_answer_and_sources
     from .planning import engine as planning_engine, _split_csv
 
@@ -149,19 +151,14 @@ async def web_search(
 
     grok_provider = GrokSearchProvider(api_url, api_key, effective_model)
 
-    # 计算额外信源配额
-    has_tavily = bool(config.tavily_api_key)
-    has_firecrawl = bool(config.firecrawl_api_key)
-    firecrawl_count = 0
-    tavily_count = 0
-    if extra_sources > 0:
-        if has_firecrawl and has_tavily:
-            firecrawl_count = round(extra_sources * 1)
-            tavily_count = extra_sources - firecrawl_count
-        elif has_firecrawl:
-            firecrawl_count = extra_sources
-        elif has_tavily:
-            tavily_count = extra_sources
+    # 计算额外信源配额（Tavily + Firecrawl dual split under GUDA_API_KEY）
+    tavily_count, firecrawl_count = allocate_extra_sources(
+        extra_sources,
+        tavily_key_present=bool(config.tavily_api_key),
+        firecrawl_key_present=bool(config.firecrawl_api_key),
+        tavily_enabled=config.tavily_enabled,
+        firecrawl_enabled=config.firecrawl_enabled,
+    )
 
     # 并行执行搜索任务
     async def _safe_grok() -> str:
@@ -360,20 +357,27 @@ async def web_fetch(
 ) -> str:
     await log_info(ctx, f"Begin Fetch: {url}", config.debug_enabled)
 
-    result = await _call_tavily_extract(url)
-    if result:
-        await log_info(ctx, "Fetch Finished (Tavily)!", config.debug_enabled)
-        return result
+    result = None
+    if config.tavily_enabled:
+        result = await _call_tavily_extract(url)
+        if result:
+            await log_info(ctx, "Fetch Finished (Tavily)!", config.debug_enabled)
+            return result
+        await log_info(ctx, "Tavily unavailable or failed, trying Firecrawl...", config.debug_enabled)
+    else:
+        await log_info(ctx, "Tavily disabled, trying Firecrawl...", config.debug_enabled)
 
-    await log_info(ctx, "Tavily unavailable or failed, trying Firecrawl...", config.debug_enabled)
-    result = await _call_firecrawl_scrape(url, ctx)
-    if result:
-        await log_info(ctx, "Fetch Finished (Firecrawl)!", config.debug_enabled)
-        return result
+    if config.firecrawl_enabled:
+        result = await _call_firecrawl_scrape(url, ctx)
+        if result:
+            await log_info(ctx, "Fetch Finished (Firecrawl)!", config.debug_enabled)
+            return result
 
     await log_info(ctx, "Fetch Failed!", config.debug_enabled)
     if not config.tavily_api_key and not config.firecrawl_api_key:
         return "配置错误: TAVILY_API_KEY 和 FIRECRAWL_API_KEY 均未配置"
+    if not config.tavily_enabled and not config.firecrawl_enabled:
+        return "配置错误: Tavily 与 Firecrawl 均已禁用"
     return "提取失败: 所有提取服务均未能获取内容"
 
 
@@ -433,6 +437,8 @@ async def web_map(
     limit: Annotated[int, Field(description="Total number of links to process before stopping.", ge=1, le=500)] = 50,
     timeout: Annotated[int, Field(description="Maximum time in seconds for the operation.", ge=10, le=150)] = 150
 ) -> str:
+    if not config.tavily_enabled:
+        return "配置错误: Tavily 已禁用 (TAVILY_ENABLED=false)"
     result = await _call_tavily_map(url, instructions, max_depth, max_breadth, limit, timeout)
     return result
 

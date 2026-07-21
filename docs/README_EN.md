@@ -20,13 +20,15 @@ Grok Search MCP is an MCP server built on [FastMCP](https://github.com/jlowin/fa
 ```
 Claude --MCP--> Grok Search Server
                   ├─ web_search  ---> Grok API (AI Search)
-                  ├─ web_fetch   ---> Tavily Extract (Content Extraction)
+                  │                    + optional extras: Tavily Search + Firecrawl Search
+                  ├─ web_fetch   ---> Tavily Extract → Firecrawl Scrape (auto-fallback)
                   └─ web_map     ---> Tavily Map (Site Mapping)
 ```
 
 ### Features
 
 - **Dual Engine**: Grok search + Tavily extraction/mapping, complementary collaboration
+- **web_search extras**: when `extra_sources>0`, quota is split between Tavily Search and Firecrawl Search (with `GUDA_API_KEY`, Tavily is **not** zeroed); default `extra_sources=0` is Grok-only
 - **OpenAI-compatible interface**, supports any Grok mirror endpoint
 - **Automatic time injection** (detects time-related queries, injects local time context)
 - One-click disable Claude Code's built-in WebSearch/WebFetch, force routing to this tool
@@ -86,7 +88,7 @@ claude mcp add-json grok-search --scope user '{
   "command": "uvx",
   "args": [
     "--from",
-    "git+https://github.com/GuDaStudio/GrokSearch@grok-with-tavily",
+    "git+https://github.com/karlorz/GrokSearch@grok-with-tavily",
     "grok-search"
   ],
   "env": {
@@ -105,7 +107,7 @@ claude mcp add-json grok-search --scope user '{
   "command": "uvx",
   "args": [
     "--from",
-    "git+https://github.com/GuDaStudio/GrokSearch@grok-with-tavily",
+    "git+https://github.com/karlorz/GrokSearch@grok-with-tavily",
     "grok-search"
   ],
   "env": {
@@ -128,9 +130,10 @@ You can also configure additional environment variables in the `env` field:
 | `GROK_MODEL` | No | `grok-4.20-beta` | Default model (takes precedence over `~/.config/grok-search/config.json` when set) |
 | `TAVILY_API_KEY` | No | `{GUDA_API_KEY}` | Tavily API key (for web_fetch / web_map) |
 | `TAVILY_API_URL` | No | `{GUDA_BASE_URL}/tavily` | Tavily API endpoint |
-| `TAVILY_ENABLED` | No | `true` | Enable Tavily |
+| `TAVILY_ENABLED` | No | `true` | Enable Tavily (search extras / extract / map) |
 | `FIRECRAWL_API_KEY` | No | `{GUDA_API_KEY}` | Firecrawl API key (fallback when Tavily fails) |
 | `FIRECRAWL_API_URL` | No | `{GUDA_BASE_URL}/firecrawl` | Firecrawl API endpoint |
+| `FIRECRAWL_ENABLED` | No | `true` | Enable Firecrawl (search extras / scrape fallback) |
 | `GROK_DEBUG` | No | `false` | Debug mode |
 | `GROK_LOG_LEVEL` | No | `INFO` | Log level |
 | `GROK_LOG_DIR` | No | `logs` | Log directory |
@@ -139,6 +142,18 @@ You can also configure additional environment variables in the `env` field:
 | `GROK_RETRY_MAX_WAIT` | No | `10` | Max retry wait in seconds |
 
 > **Note**: When `GUDA_API_KEY` is set, all `GROK_API_URL`/`GROK_API_KEY`/`TAVILY_*`/`FIRECRAWL_*` variables become optional as they are auto-derived from `GUDA_BASE_URL`. Explicitly set variables take higher priority.
+
+### web_search extras allocation (`extra_sources`)
+
+| `extra_sources` | Both enabled | Notes |
+|-----------------|--------------|-------|
+| `0` (default) | — | Grok only |
+| `1` | Tavily=1, Firecrawl=0 | Single extra prefers Tavily |
+| `≥2` | ~30% Tavily / ~70% Firecrawl | **Tavily share is never zero** when both are on |
+
+Disable one side: `TAVILY_ENABLED=false` → all extras to Firecrawl; `FIRECRAWL_ENABLED=false` → all extras to Tavily.
+
+**This fork install pin:** `git+https://github.com/karlorz/GrokSearch@grok-with-tavily`
 
 
 ### Verify Installation

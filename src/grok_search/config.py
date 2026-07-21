@@ -99,6 +99,10 @@ class Config:
         return os.getenv("TAVILY_ENABLED", "true").lower() in ("true", "1", "yes")
 
     @property
+    def firecrawl_enabled(self) -> bool:
+        return os.getenv("FIRECRAWL_ENABLED", "true").lower() in ("true", "1", "yes")
+
+    @property
     def tavily_api_url(self) -> str:
         url = os.getenv("TAVILY_API_URL")
         if not url and self.guda_api_key:
@@ -209,6 +213,7 @@ class Config:
             "TAVILY_ENABLED": self.tavily_enabled,
             "TAVILY_API_KEY": self._mask_api_key(self.tavily_api_key) if self.tavily_api_key else "未配置",
             "FIRECRAWL_API_URL": self.firecrawl_api_url,
+            "FIRECRAWL_ENABLED": self.firecrawl_enabled,
             "FIRECRAWL_API_KEY": self._mask_api_key(self.firecrawl_api_key) if self.firecrawl_api_key else "未配置",
             "config_status": config_status,
         }
