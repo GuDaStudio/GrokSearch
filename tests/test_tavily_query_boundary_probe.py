@@ -145,6 +145,12 @@ async def test_confirmed_probe_is_bounded_and_output_is_private() -> None:
         for request in requests
     )
     assert all(request.url == "https://api.tavily.com/search" for request in requests)
+    for request in requests:
+        body = json.loads(request.content)
+        assert body["max_results"] == 1
+        assert body["search_depth"] == "basic"
+        assert body["include_answer"] is False
+        assert body["include_raw_content"] is False
 
     output = stdout.getvalue() + stderr.getvalue()
     assert fake_key not in output
