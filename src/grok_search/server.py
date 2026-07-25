@@ -13,14 +13,14 @@ from pydantic import Field
 # 尝试使用绝对导入（支持 mcp run）
 try:
     from grok_search.providers.grok import GrokSearchProvider
-    from grok_search.logger import log_info
+    from grok_search.logger import log_info, logger
     from grok_search.config import config
     from grok_search.extras import allocate_extra_sources
     from grok_search.sources import SourcesCache, merge_sources, new_session_id, split_answer_and_sources
     from grok_search.planning import engine as planning_engine, _split_csv
 except ImportError:
     from .providers.grok import GrokSearchProvider
-    from .logger import log_info
+    from .logger import log_info, logger
     from .config import config
     from .extras import allocate_extra_sources
     from .sources import SourcesCache, merge_sources, new_session_id, split_answer_and_sources
@@ -33,6 +33,7 @@ mcp = FastMCP("grok-search")
 _SOURCES_CACHE = SourcesCache(max_size=256)
 _AVAILABLE_MODELS_CACHE: dict[tuple[str, str], list[str]] = {}
 _AVAILABLE_MODELS_LOCK = asyncio.Lock()
+TAVILY_MAX_QUERY_CHARS = 400
 
 
 async def _fetch_available_models(api_url: str, api_key: str) -> list[str]:
@@ -128,7 +129,12 @@ def _extra_results_to_sources(
     meta={"version": "2.0.0", "author": "guda.studio"},
 )
 async def web_search(
-    query: Annotated[str, "Clear, self-contained natural-language search query."],
+    query: Annotated[
+        str,
+        "Clear, self-contained natural-language search query. Keep it concise; "
+        f"when Tavily extras are used, only the first {TAVILY_MAX_QUERY_CHARS} "
+        "characters are sent to Tavily while Grok and Firecrawl retain the full query.",
+    ],
     platform: Annotated[str, "Target platform to focus on (e.g., 'Twitter', 'GitHub', 'Reddit'). Leave empty for general web search."] = "",
     model: Annotated[str, "Optional model ID for this request only. This value is used ONLY when user explicitly provided."] = "",
     extra_sources: Annotated[int, "Number of additional reference results from Tavily/Firecrawl. Set 0 to disable. Default 0."] = 0,
@@ -259,8 +265,15 @@ async def _call_tavily_search(query: str, max_results: int = 6) -> list[dict] | 
         return None
     endpoint = f"{config.tavily_api_url.rstrip('/')}/search"
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    tavily_query = query[:TAVILY_MAX_QUERY_CHARS]
+    if len(tavily_query) < len(query):
+        logger.warning(
+            "Tavily search query truncated from %d to %d characters",
+            len(query),
+            len(tavily_query),
+        )
     body = {
-        "query": query,
+        "query": tavily_query,
         "max_results": max_results,
         "search_depth": "advanced",
         "include_raw_content": False,
