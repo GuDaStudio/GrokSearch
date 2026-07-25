@@ -128,7 +128,7 @@ You can also configure additional environment variables in the `env` field:
 | `GROK_API_URL` | No | `{GUDA_BASE_URL}/grok/v1` | Grok API endpoint (OpenAI-compatible), overrides GuDa-derived value |
 | `GROK_API_KEY` | No | `{GUDA_API_KEY}` | Grok API key, overrides GuDa-derived value |
 | `GROK_MODEL` | No | `grok-4.20-beta` | Default model (takes precedence over `~/.config/grok-search/config.json` when set) |
-| `TAVILY_API_KEY` | No | `{GUDA_API_KEY}` | Tavily API key (for web_fetch / web_map) |
+| `TAVILY_API_KEY` | No | `{GUDA_API_KEY}` | Tavily API key (for web_search extras / web_fetch / web_map) |
 | `TAVILY_API_URL` | No | `{GUDA_BASE_URL}/tavily` | Tavily API endpoint |
 | `TAVILY_ENABLED` | No | `true` | Enable Tavily (search extras / extract / map) |
 | `FIRECRAWL_API_KEY` | No | `{GUDA_API_KEY}` | Firecrawl API key (fallback when Tavily fails) |
@@ -154,6 +154,30 @@ You can also configure additional environment variables in the `env` field:
 Disable one side: `TAVILY_ENABLED=false` → all extras to Firecrawl; `FIRECRAWL_ENABLED=false` → all extras to Tavily.
 
 **This fork install pin:** `git+https://github.com/karlorz/GrokSearch@grok-with-tavily`
+
+#### Tavily query-length guard
+
+- Grok always receives the full `web_search` query. Firecrawl also receives the full query when it is allocated an extra-source share.
+- Only the Tavily Search request is capped at the provider boundary, using the first **400 Python Unicode code points**, to prevent a terminal `Query is too long` HTTP 400.
+- Callers should still submit concise, search-engine-style queries. GrokSearch does not automatically fan one long query into multiple Tavily searches because every subquery adds API-credit usage and latency.
+- Truncation warnings contain original and final lengths only, never query content.
+
+The repository includes a boundary probe that is offline by default:
+
+```bash
+# Reports the target host and bounded cost; sends no request
+uv run grok-search-tavily-probe
+
+# Provide TAVILY_API_KEY through a secure environment first; do not paste a live key into shell history
+# Explicit live confirmation: ASCII/CJK/emoji × 399/400/401 = 9 basic Searches
+uv run grok-search-tavily-probe --confirm-live
+
+# GuDa-compatible gateway (set its bearer securely; do not log it)
+uv run grok-search-tavily-probe \
+  --base-url https://your-gateway.example/tavily --confirm-live
+```
+
+The probe outputs only the case label, Python code-point count, UTF-8 byte count, HTTP status, and normalized classification. It never outputs credentials, generated queries, response bodies, raw error details, or search results. Live mode consumes nine basic Search operations.
 
 
 ### Verify Installation
@@ -183,7 +207,7 @@ Executes AI-driven web search via Grok API. By default it returns only Grok's an
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `query` | string | Yes | - | Search query |
+| `query` | string | Yes | - | Keep concise. Tavily extras receive at most the first 400 Python Unicode code points; Grok and Firecrawl retain the full query |
 | `platform` | string | No | `""` | Focus platform (e.g., `"Twitter"`, `"GitHub, Reddit"`) |
 | `model` | string | No | `null` | Per-request Grok model ID |
 | `extra_sources` | int | No | `0` | Extra sources via Tavily/Firecrawl (0 disables) |

@@ -26,3 +26,4 @@ where = ["src"]
 
 [project.scripts]
 grok-search = "grok_search.server:main"
+grok-search-tavily-probe = "grok_search.tavily_boundary_probe:main"

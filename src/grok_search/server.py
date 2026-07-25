@@ -15,6 +15,7 @@ try:
     from grok_search.providers.grok import GrokSearchProvider
     from grok_search.logger import log_info, logger
     from grok_search.config import config
+    from grok_search.constants import TAVILY_MAX_QUERY_CHARS
     from grok_search.extras import allocate_extra_sources
     from grok_search.sources import SourcesCache, merge_sources, new_session_id, split_answer_and_sources
     from grok_search.planning import engine as planning_engine, _split_csv
@@ -22,6 +23,7 @@ except ImportError:
     from .providers.grok import GrokSearchProvider
     from .logger import log_info, logger
     from .config import config
+    from .constants import TAVILY_MAX_QUERY_CHARS
     from .extras import allocate_extra_sources
     from .sources import SourcesCache, merge_sources, new_session_id, split_answer_and_sources
     from .planning import engine as planning_engine, _split_csv
@@ -33,9 +35,6 @@ mcp = FastMCP("grok-search")
 _SOURCES_CACHE = SourcesCache(max_size=256)
 _AVAILABLE_MODELS_CACHE: dict[tuple[str, str], list[str]] = {}
 _AVAILABLE_MODELS_LOCK = asyncio.Lock()
-TAVILY_MAX_QUERY_CHARS = 400
-
-
 async def _fetch_available_models(api_url: str, api_key: str) -> list[str]:
     import httpx
 

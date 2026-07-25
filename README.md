@@ -151,7 +151,7 @@ claude mcp add-json grok-search --scope user '{
 | `GROK_API_URL` | ❌ | `{GUDA_BASE_URL}/grok/v1` | Grok API 地址（OpenAI 兼容格式），显式设置时覆盖 GuDa 派生值 |
 | `GROK_API_KEY` | ❌ | `{GUDA_API_KEY}` | Grok API 密钥，显式设置时覆盖 GuDa 派生值 |
 | `GROK_MODEL` | ❌ | `grok-4.20-beta` | 默认模型（设置后优先于 `~/.config/grok-search/config.json`） |
-| `TAVILY_API_KEY` | ❌ | `{GUDA_API_KEY}` | Tavily API 密钥（用于 web_fetch / web_map） |
+| `TAVILY_API_KEY` | ❌ | `{GUDA_API_KEY}` | Tavily API 密钥（用于 web_search extras / web_fetch / web_map） |
 | `TAVILY_API_URL` | ❌ | `{GUDA_BASE_URL}/tavily` | Tavily API 地址 |
 | `TAVILY_ENABLED` | ❌ | `true` | 是否启用 Tavily（search extras / extract / map） |
 | `FIRECRAWL_API_KEY` | ❌ | `{GUDA_API_KEY}` | Firecrawl API 密钥（Tavily 失败时托底） |
@@ -175,6 +175,30 @@ claude mcp add-json grok-search --scope user '{
 | `≥2` | 约 30% Tavily / 70% Firecrawl | 双方均启用时 **Tavily 份额不为 0** |
 
 关闭一侧：`TAVILY_ENABLED=false` → extras 全给 Firecrawl；`FIRECRAWL_ENABLED=false` → extras 全给 Tavily。
+
+#### Tavily 查询长度保护
+
+- `web_search` 的完整查询仍会发送给 Grok；分配到 Firecrawl 时，Firecrawl 也会收到完整查询。
+- 只有 Tavily Search 请求在发送边界被限制为前 **400 个 Python Unicode 码点**，避免 Tavily 返回 `Query is too long` 的终止性 HTTP 400。
+- 建议调用方传入简洁、类似搜索引擎的查询。系统不会自动把长查询拆成多个 Tavily 搜索，因为每个子查询都会增加 API credits 消耗和延迟。
+- 长度截断日志只记录截断前后的长度，不记录查询内容。
+
+仓库提供一个默认不联网的边界探针：
+
+```bash
+# 仅显示目标主机和预计成本，不发送请求
+uv run grok-search-tavily-probe
+
+# 先通过安全的环境配置提供 TAVILY_API_KEY，不要把真实密钥粘贴到命令历史
+# 明确确认后才执行：ASCII/CJK/emoji × 399/400/401，共 9 次 basic Search
+uv run grok-search-tavily-probe --confirm-live
+
+# GuDa 兼容网关（先安全设置对应 bearer；不要写入命令历史或日志）
+uv run grok-search-tavily-probe \
+  --base-url https://your-gateway.example/tavily --confirm-live
+```
+
+探针只输出测试标签、Python 码点数、UTF-8 字节数、HTTP 状态和归一化分类；不会输出密钥、查询、响应正文、错误详情或搜索结果。直接执行 live 模式会消耗 9 次 basic Search credits。
 
 
 ### 验证安装
@@ -204,7 +228,7 @@ claude mcp list
 
 | 参数 | 类型 | 必填 | 默认值 | 说明 |
 |------|------|------|--------|------|
-| `query` | string | ✅ | - | 搜索查询语句 |
+| `query` | string | ✅ | - | 搜索查询语句；保持简洁。Tavily extras 最多接收前 400 个 Python Unicode 码点，Grok/Firecrawl 保留完整查询 |
 | `platform` | string | ❌ | `""` | 聚焦平台（如 `"Twitter"`, `"GitHub, Reddit"`） |
 | `model` | string | ❌ | `null` | 按次指定 Grok 模型 ID |
 | `extra_sources` | int | ❌ | `0` | 额外补充信源数量（Tavily/Firecrawl，可为 0 关闭） |
