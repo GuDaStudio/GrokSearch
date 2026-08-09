@@ -13,12 +13,13 @@ from .utils import extract_unique_urls
 _MD_LINK_PATTERN = re.compile(r"\[([^\]]+)\]\((https?://[^)]+)\)")
 _SOURCES_HEADING_PATTERN = re.compile(
     r"(?im)^"
+    r"(?:\*\*|__)?\s*"
     r"(?:#{1,6}\s*)?"
     r"(?:\*\*|__)?\s*"
     r"(sources?|references?|citations?|信源|参考资料|参考|引用|来源列表|来源)"
     r"\s*(?:\*\*|__)?"
     r"(?:\s*[（(][^)\n]*[)）])?"
-    r"\s*[:：]?\s*$"
+    r"\s*(?:\*\*|__)?\s*[:：]?\s*(?:\*\*|__)?\s*$"
 )
 _SOURCES_FUNCTION_PATTERN = re.compile(
     r"(?im)(^|\n)\s*(sources|source|citations|citation|references|reference|citation_card|source_cards|source_card)\s*\("
