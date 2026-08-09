@@ -89,3 +89,54 @@ async def test_web_search_merges_structured_fallback_and_extra_sources(
         ],
         "sources_count": 4,
     }
+
+
+@pytest.mark.asyncio
+async def test_web_search_keeps_structured_precedence_over_inline_urls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    answer_text = (
+        "Read [Inline B](https://example.test/b) before "
+        "[Fallback A](https://example.test/a)."
+    )
+
+    class _FakeGrokProvider:
+        def __init__(self, api_url: str, api_key: str, model: str) -> None:
+            pass
+
+        async def search(self, query: str, platform: str) -> SearchOutput:
+            return SearchOutput(
+                content=answer_text,
+                sources=(
+                    NormalizedSource(
+                        url="https://example.test/a",
+                        title="Structured A",
+                        provider="grok",
+                    ),
+                ),
+            )
+
+    monkeypatch.setenv("GROK_API_URL", "https://grok.test/v1")
+    monkeypatch.setenv("GROK_API_KEY", "test-grok-key")
+    monkeypatch.setattr(server, "GrokSearchProvider", _FakeGrokProvider)
+
+    search_response = await server.web_search("query")
+    source_response = await server.get_sources(search_response["session_id"])
+
+    assert search_response == {
+        "session_id": search_response["session_id"],
+        "content": answer_text,
+        "sources_count": 2,
+    }
+    assert source_response == {
+        "session_id": search_response["session_id"],
+        "sources": [
+            {
+                "url": "https://example.test/a",
+                "title": "Structured A",
+                "provider": "grok",
+            },
+            {"url": "https://example.test/b", "title": "Inline B"},
+        ],
+        "sources_count": 2,
+    }

@@ -92,7 +92,7 @@ def split_answer_and_sources(text: str) -> tuple[str, list[dict]]:
     if split:
         return split
 
-    return raw, []
+    return raw, _extract_sources_from_text(raw)
 
 
 def _split_function_call_sources(text: str) -> tuple[str, list[dict]] | None:
@@ -308,24 +308,24 @@ def _normalize_sources(data: Any) -> list[dict]:
 
 
 def _extract_sources_from_text(text: str) -> list[dict]:
-    sources: list[dict] = []
-    seen: set[str] = set()
+    raw = text or ""
+    if "http://" not in raw and "https://" not in raw:
+        return []
 
-    for title, url in _MD_LINK_PATTERN.findall(text or ""):
-        url = (url or "").strip()
-        if not url or url in seen:
-            continue
-        seen.add(url)
+    titles_by_url: dict[str, str] = {}
+
+    for title, href in _MD_LINK_PATTERN.findall(raw):
         title = (title or "").strip()
+        markdown_urls = extract_unique_urls(href or "")
+        if markdown_urls and title and markdown_urls[0] not in titles_by_url:
+            titles_by_url[markdown_urls[0]] = title
+
+    candidates: list[dict] = []
+    for url in extract_unique_urls(raw):
+        source = {"url": url}
+        title = titles_by_url.get(url)
         if title:
-            sources.append({"title": title, "url": url})
-        else:
-            sources.append({"url": url})
+            source["title"] = title
+        candidates.append(source)
 
-    for url in extract_unique_urls(text or ""):
-        if url in seen:
-            continue
-        seen.add(url)
-        sources.append({"url": url})
-
-    return sources
+    return _normalize_sources(candidates)
