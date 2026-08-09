@@ -12,6 +12,7 @@ from pydantic import Field
 
 # 尝试使用绝对导入（支持 mcp run）
 try:
+    from grok_search.providers.contracts import SearchOutput
     from grok_search.providers.grok import GrokSearchProvider
     from grok_search.logger import log_info, logger
     from grok_search.config import config
@@ -20,6 +21,7 @@ try:
     from grok_search.sources import SourcesCache, merge_sources, new_session_id, split_answer_and_sources
     from grok_search.planning import engine as planning_engine, _split_csv
 except ImportError:
+    from .providers.contracts import SearchOutput
     from .providers.grok import GrokSearchProvider
     from .logger import log_info, logger
     from .config import config
@@ -78,14 +80,12 @@ def _extra_results_to_sources(
     firecrawl_results: list[dict] | None,
 ) -> list[dict]:
     sources: list[dict] = []
-    seen: set[str] = set()
 
     if firecrawl_results:
         for r in firecrawl_results:
             url = (r.get("url") or "").strip()
-            if not url or url in seen:
+            if not url:
                 continue
-            seen.add(url)
             item: dict = {"url": url, "provider": "firecrawl"}
             title = (r.get("title") or "").strip()
             if title:
@@ -98,9 +98,8 @@ def _extra_results_to_sources(
     if tavily_results:
         for r in tavily_results:
             url = (r.get("url") or "").strip()
-            if not url or url in seen:
+            if not url:
                 continue
-            seen.add(url)
             item: dict = {"url": url, "provider": "tavily"}
             title = (r.get("title") or "").strip()
             if title:
@@ -166,11 +165,11 @@ async def web_search(
     )
 
     # 并行执行搜索任务
-    async def _safe_grok() -> str:
+    async def _safe_grok() -> SearchOutput:
         try:
             return await grok_provider.search(query, platform)
         except Exception:
-            return ""
+            return SearchOutput()
 
     async def _safe_tavily() -> list[dict] | None:
         try:
@@ -194,7 +193,7 @@ async def web_search(
 
     gathered = await asyncio.gather(*coros)
 
-    grok_result: str = gathered[0] or ""
+    grok_result: SearchOutput = gathered[0] or SearchOutput()
     tavily_results: list[dict] | None = None
     firecrawl_results: list[dict] | None = None
     idx = 1
@@ -204,9 +203,9 @@ async def web_search(
     if firecrawl_count > 0:
         firecrawl_results = gathered[idx]
 
-    answer, grok_sources = split_answer_and_sources(grok_result)
+    answer, fallback_sources = split_answer_and_sources(grok_result.content)
     extra = _extra_results_to_sources(tavily_results, firecrawl_results)
-    all_sources = merge_sources(grok_sources, extra)
+    all_sources = merge_sources(grok_result.sources, fallback_sources, extra)
 
     await _SOURCES_CACHE.set(session_id, all_sources)
     return {"session_id": session_id, "content": answer, "sources_count": len(all_sources)}

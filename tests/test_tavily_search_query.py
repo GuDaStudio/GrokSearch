@@ -6,6 +6,7 @@ import httpx
 import pytest
 
 import grok_search.server as server
+from grok_search.providers.contracts import SearchOutput
 
 
 TAVILY_QUERY_LIMIT = server.TAVILY_MAX_QUERY_CHARS
@@ -106,9 +107,9 @@ async def test_web_search_keeps_full_query_for_provider_calls(
         def __init__(self, api_url: str, api_key: str, model: str) -> None:
             pass
 
-        async def search(self, received_query: str, platform: str) -> str:
+        async def search(self, received_query: str, platform: str) -> SearchOutput:
             calls["grok"] = received_query
-            return "answer"
+            return SearchOutput(content="answer")
 
     async def _record_tavily(received_query: str, max_results: int):
         calls["tavily_helper"] = received_query

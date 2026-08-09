@@ -1,4 +1,5 @@
 import ast
+import copy
 import json
 import re
 import uuid
@@ -7,6 +8,7 @@ from typing import Any
 
 import asyncio
 
+from .providers.contracts import NormalizedSource, merge_normalized_sources
 from .utils import extract_unique_urls
 
 
@@ -37,7 +39,7 @@ class SourcesCache:
 
     async def set(self, session_id: str, sources: list[dict]) -> None:
         async with self._lock:
-            self._cache[session_id] = sources
+            self._cache[session_id] = copy.deepcopy(sources)
             self._cache.move_to_end(session_id)
             while len(self._cache) > self._max_size:
                 self._cache.popitem(last=False)
@@ -48,23 +50,25 @@ class SourcesCache:
             if sources is None:
                 return None
             self._cache.move_to_end(session_id)
-            return sources
+            return copy.deepcopy(sources)
 
 
-def merge_sources(*source_lists: list[dict]) -> list[dict]:
-    seen: set[str] = set()
-    merged: list[dict] = []
+def merge_sources(
+    *source_lists: list[dict | NormalizedSource] | tuple[NormalizedSource, ...],
+) -> list[dict]:
+    normalized_sources: list[NormalizedSource] = []
     for sources in source_lists:
         for item in sources or []:
-            url = (item or {}).get("url")
-            if not isinstance(url, str) or not url.strip():
-                continue
-            url = url.strip()
-            if url in seen:
-                continue
-            seen.add(url)
-            merged.append(item)
-    return merged
+            source = (
+                item
+                if isinstance(item, NormalizedSource)
+                else NormalizedSource.from_mapping(item)
+                if isinstance(item, dict)
+                else None
+            )
+            if source is not None:
+                normalized_sources.append(source)
+    return [source.to_dict() for source in merge_normalized_sources(normalized_sources)]
 
 
 def split_answer_and_sources(text: str) -> tuple[str, list[dict]]:
@@ -278,36 +282,26 @@ def _normalize_sources(data: Any) -> list[dict]:
     for item in items:
         if isinstance(item, str):
             for url in extract_unique_urls(item):
-                if url not in seen:
-                    seen.add(url)
-                    normalized.append({"url": url})
+                source = NormalizedSource.from_mapping({"url": url})
+                if source is not None and source.url not in seen:
+                    seen.add(source.url)
+                    normalized.append(source.to_dict())
             continue
 
         if isinstance(item, (list, tuple)) and len(item) >= 2:
             title, url = item[0], item[1]
-            if isinstance(url, str) and url.startswith(("http://", "https://")) and url not in seen:
-                seen.add(url)
-                out: dict = {"url": url}
-                if isinstance(title, str) and title.strip():
-                    out["title"] = title.strip()
-                normalized.append(out)
+            source = NormalizedSource.from_mapping({"url": url, "title": title})
+            if source is not None and source.url not in seen:
+                seen.add(source.url)
+                normalized.append(source.to_dict())
             continue
 
         if isinstance(item, dict):
-            url = item.get("url") or item.get("href") or item.get("link")
-            if not isinstance(url, str) or not url.startswith(("http://", "https://")):
+            source = NormalizedSource.from_mapping(item)
+            if source is None or source.url in seen:
                 continue
-            if url in seen:
-                continue
-            seen.add(url)
-            out: dict = {"url": url}
-            title = item.get("title") or item.get("name") or item.get("label")
-            if isinstance(title, str) and title.strip():
-                out["title"] = title.strip()
-            desc = item.get("description") or item.get("snippet") or item.get("content")
-            if isinstance(desc, str) and desc.strip():
-                out["description"] = desc.strip()
-            normalized.append(out)
+            seen.add(source.url)
+            normalized.append(source.to_dict())
             continue
 
     return normalized

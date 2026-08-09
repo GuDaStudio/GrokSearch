@@ -2,11 +2,12 @@ import httpx
 import json
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
-from typing import List, Optional
+from typing import Any, Optional
 from tenacity import AsyncRetrying, retry_if_exception, stop_after_attempt, wait_random_exponential
 from tenacity.wait import wait_base
 from zoneinfo import ZoneInfo
-from .base import BaseSearchProvider, SearchResult
+from .base import BaseSearchProvider
+from .contracts import NormalizedSource, SearchOutput, merge_normalized_sources
 from ..utils import search_prompt, fetch_prompt, url_describe_prompt, rank_sources_prompt
 from ..logger import log_info
 from ..config import config
@@ -125,7 +126,7 @@ class GrokSearchProvider(BaseSearchProvider):
     def get_provider_name(self) -> str:
         return "Grok"
 
-    async def search(self, query: str, platform: str = "", min_results: int = 3, max_results: int = 10, ctx=None) -> List[SearchResult]:
+    async def search(self, query: str, platform: str = "", min_results: int = 3, max_results: int = 10, ctx=None) -> SearchOutput:
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
@@ -169,18 +170,65 @@ class GrokSearchProvider(BaseSearchProvider):
             ],
             "stream": True,
         }
-        return await self._execute_stream_with_retry(headers, payload, ctx)
+        result = await self._execute_stream_with_retry(headers, payload, ctx)
+        return result.content
 
-    async def _parse_streaming_response(self, response, ctx=None) -> str:
+    @staticmethod
+    def _source_from_payload(payload: Any) -> NormalizedSource | None:
+        if not isinstance(payload, dict):
+            return None
+        return NormalizedSource.from_mapping(payload, provider="grok")
+
+    @classmethod
+    def _parts_from_event(cls, data: Any) -> tuple[str, list[NormalizedSource]]:
+        if not isinstance(data, dict):
+            return "", []
+
         content = ""
-        full_body_buffer = [] 
-        
+        sources: list[NormalizedSource] = []
+        choices = data.get("choices")
+        if isinstance(choices, list) and choices and isinstance(choices[0], dict):
+            choice = choices[0]
+            delta = choice.get("delta")
+            message = choice.get("message")
+
+            for container in (delta, message):
+                if not isinstance(container, dict):
+                    continue
+                value = container.get("content")
+                if isinstance(value, str):
+                    content += value
+                annotations = container.get("annotations")
+                if isinstance(annotations, list):
+                    for annotation in annotations:
+                        source = cls._source_from_payload(annotation)
+                        if source is not None:
+                            sources.append(source)
+
+        search_sources = data.get("search_sources")
+        if isinstance(search_sources, list):
+            for item in search_sources:
+                source = cls._source_from_payload(item)
+                if source is not None:
+                    sources.append(source)
+
+        return content, sources
+
+    async def _parse_streaming_response(self, response, ctx=None) -> SearchOutput:
+        content_parts: list[str] = []
+        source_candidates: list[NormalizedSource] = []
+        plain_body_buffer: list[str] = []
+
+        def _consume_event(data: Any) -> None:
+            event_content, event_sources = self._parts_from_event(data)
+            if event_content:
+                content_parts.append(event_content)
+            source_candidates.extend(event_sources)
+
         async for line in response.aiter_lines():
             line = line.strip()
             if not line:
                 continue
-            
-            full_body_buffer.append(line)
 
             # 兼容 "data: {...}" 和 "data:{...}" 两种 SSE 格式
             if line.startswith("data:"):
@@ -190,29 +238,29 @@ class GrokSearchProvider(BaseSearchProvider):
                     # 去掉 "data:" 前缀，并去除可能的空格
                     json_str = line[5:].lstrip()
                     data = json.loads(json_str)
-                    choices = data.get("choices", [])
-                    if choices and len(choices) > 0:
-                        delta = choices[0].get("delta", {})
-                        if "content" in delta:
-                            content += delta["content"]
-                except (json.JSONDecodeError, IndexError):
+                    _consume_event(data)
+                except json.JSONDecodeError:
                     continue
-                
-        if not content and full_body_buffer:
+            else:
+                plain_body_buffer.append(line)
+
+        if plain_body_buffer:
             try:
-                full_text = "".join(full_body_buffer)
+                full_text = "".join(plain_body_buffer)
                 data = json.loads(full_text)
-                if "choices" in data and len(data["choices"]) > 0:
-                    message = data["choices"][0].get("message", {})
-                    content = message.get("content", "")
+                _consume_event(data)
             except json.JSONDecodeError:
                 pass
-        
+
+        content = "".join(content_parts)
         await log_info(ctx, f"content: {content}", config.debug_enabled)
 
-        return content
+        return SearchOutput(
+            content=content,
+            sources=merge_normalized_sources(source_candidates),
+        )
 
-    async def _execute_stream_with_retry(self, headers: dict, payload: dict, ctx=None) -> str:
+    async def _execute_stream_with_retry(self, headers: dict, payload: dict, ctx=None) -> SearchOutput:
         """执行带重试机制的流式 HTTP 请求"""
         timeout = httpx.Timeout(connect=6.0, read=120.0, write=10.0, pool=None)
 
@@ -247,7 +295,7 @@ class GrokSearchProvider(BaseSearchProvider):
             ],
             "stream": True,
         }
-        result = await self._execute_stream_with_retry(headers, payload, ctx)
+        result = (await self._execute_stream_with_retry(headers, payload, ctx)).content
         title, extracts = url, ""
         for line in result.strip().splitlines():
             if line.startswith("Title:"):
@@ -270,7 +318,7 @@ class GrokSearchProvider(BaseSearchProvider):
             ],
             "stream": True,
         }
-        result = await self._execute_stream_with_retry(headers, payload, ctx)
+        result = (await self._execute_stream_with_retry(headers, payload, ctx)).content
         order: list[int] = []
         seen: set[int] = set()
         for token in result.strip().split():
