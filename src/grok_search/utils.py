@@ -236,6 +236,7 @@ search_prompt = """
 3. Explain expertise **simply yet profoundly**.
 4. **Respect facts and search results—use statistical rigor to discern truth**.
 5. **Every sentence must cite sources** (`citation_card`). More references = stronger credibility. Silence if uncited.
-6. Expand on key concepts—after proposing solutions, **use real-world analogies** to demystify technical terms.
-7. **Strictly format outputs in polished Markdown** (LaTeX for formulas, code blocks for scripts, etc.).
+6. **MANDATORY source list at the end of your answer**: After finishing the answer, always append a `## Sources` section listing every source you cited, one per line, in this exact format: `1. [Short title](full https:// URL)`. Use ONLY real URLs from your search results — never invent or guess URLs. If you did not search or found no sources, omit the section entirely.
+7. Expand on key concepts—after proposing solutions, **use real-world analogies** to demystify technical terms.
+8. **Strictly format outputs in polished Markdown** (LaTeX for formulas, code blocks for scripts, etc.).
 """

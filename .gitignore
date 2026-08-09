@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+build/
+dist/
+
+# 环境与配置（含敏感信息，切勿提交）
+.env
+.env.*
+config.json
+*.local
+
+# 日志
+logs/
+*.log
