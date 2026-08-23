@@ -163,8 +163,28 @@ claude mcp add-json grok-search --scope user '{
 | `GROK_RETRY_MAX_ATTEMPTS` | ❌ | `3` | 最大重试次数 |
 | `GROK_RETRY_MULTIPLIER` | ❌ | `1` | 重试退避乘数 |
 | `GROK_RETRY_MAX_WAIT` | ❌ | `10` | 重试最大等待秒数 |
+| `GROK_SEARCH_MCP_TRANSPORT` | ❌ | `stdio` | MCP 传输：`stdio`（默认）或 `http`（附加 loopback） |
+| `GROK_SEARCH_MCP_HOST` | ❌ | `127.0.0.1` | HTTP 绑定地址；默认 loopback，不会默认 `0.0.0.0` |
+| `GROK_SEARCH_MCP_PORT` | ❌ | `8800` | HTTP 端口（避开 80/8080/6080） |
+| `GROK_SEARCH_MCP_PATH` | ❌ | `/mcp` | HTTP MCP 路径 |
+| `GROK_SEARCH_MCP_TOKEN` | HTTP 必填 | - | 入站 Bearer。仅 HTTP 使用；缺失则 fail-closed。不要复用 `GUDA_API_KEY` / Grok / Tavily / Firecrawl 密钥 |
 
 > **注意**：配置了 `GUDA_API_KEY` 后，`GROK_API_URL`/`GROK_API_KEY`/`TAVILY_*`/`FIRECRAWL_*` 均为可选，系统自动从 `GUDA_BASE_URL` 派生。显式设置的独立变量优先级更高。
+
+### 可选 HTTP MCP（stdio 仍是默认）
+
+默认仍走 FastMCP `stdio`。需要本机 HTTP 时：
+
+```bash
+export GROK_SEARCH_MCP_TOKEN="$(openssl rand -hex 32)"
+GROK_SEARCH_MCP_TRANSPORT=http \
+  GROK_SEARCH_MCP_TOKEN="$GROK_SEARCH_MCP_TOKEN" \
+  uv run grok-search
+```
+
+服务监听 `http://127.0.0.1:8800/mcp`，校验 `Authorization: Bearer <GROK_SEARCH_MCP_TOKEN>`；缺头或错 token 返回 401。stdio 不使用该 token。
+
+仓库内 `cursor-plugin/` 是本地 Cursor 插件示例（`type: "http"`，`variables.GROK_SEARCH_MCP_TOKEN` 必填，`mcpServers` 指向 `./mcp.json`），不是 marketplace。详见 `cursor-plugin/README.md`。
 
 ### web_search extras 分配（`extra_sources`）
 

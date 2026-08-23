@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "grok-search": {
+      "type": "http",
+      "url": "http://127.0.0.1:8800/mcp",
+      "headers": {
+        "Authorization": "Bearer ${GROK_SEARCH_MCP_TOKEN}"
+      }
+    }
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "name": "grok-search",
+  "displayName": "Grok Search",
+  "version": "0.1.0",
+  "description": "Self-hosted Grok Search MCP over loopback HTTP. stdio remains the default server transport.",
+  "author": {
+    "name": "karlorz"
+  },
+  "license": "MIT",
+  "keywords": ["grok", "search", "mcp", "http"],
+  "variables": {
+    "type": "object",
+    "properties": {
+      "GROK_SEARCH_MCP_TOKEN": {
+        "type": "string",
+        "title": "Grok Search MCP bearer token",
+        "description": "Shared secret sent as Authorization: Bearer for the local HTTP MCP. Required. Do not reuse GUDA_API_KEY, GROK_API_KEY, TAVILY_API_KEY, or FIRECRAWL_API_KEY."
+      }
+    },
+    "required": ["GROK_SEARCH_MCP_TOKEN"]
+  },
+  "mcpServers": "./mcp.json"
+}

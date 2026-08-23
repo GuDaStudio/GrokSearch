@@ -18,6 +18,7 @@ try:
     from grok_search.config import config
     from grok_search.constants import TAVILY_MAX_QUERY_CHARS
     from grok_search.extras import allocate_extra_sources
+    from grok_search.mcp_transport import McpHttpConfigError, run_mcp
     from grok_search.sources import SourcesCache, merge_sources, new_session_id, split_answer_and_sources
     from grok_search.planning import engine as planning_engine, _split_csv
 except ImportError:
@@ -27,6 +28,7 @@ except ImportError:
     from .config import config
     from .constants import TAVILY_MAX_QUERY_CHARS
     from .extras import allocate_extra_sources
+    from .mcp_transport import McpHttpConfigError, run_mcp
     from .sources import SourcesCache, merge_sources, new_session_id, split_answer_and_sources
     from .planning import engine as planning_engine, _split_csv
 
@@ -897,7 +899,10 @@ def main():
         threading.Thread(target=monitor_parent, daemon=True).start()
 
     try:
-        mcp.run(transport="stdio", show_banner=False)
+        run_mcp(mcp)
+    except McpHttpConfigError as e:
+        print(f"MCP HTTP config error: {e}", file=sys.stderr)
+        os._exit(1)
     except KeyboardInterrupt:
         pass
     finally:

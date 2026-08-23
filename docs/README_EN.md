@@ -140,8 +140,28 @@ You can also configure additional environment variables in the `env` field:
 | `GROK_RETRY_MAX_ATTEMPTS` | No | `3` | Max retry attempts |
 | `GROK_RETRY_MULTIPLIER` | No | `1` | Retry backoff multiplier |
 | `GROK_RETRY_MAX_WAIT` | No | `10` | Max retry wait in seconds |
+| `GROK_SEARCH_MCP_TRANSPORT` | No | `stdio` | MCP transport: `stdio` (default) or additive `http` |
+| `GROK_SEARCH_MCP_HOST` | No | `127.0.0.1` | HTTP bind address; loopback default, never `0.0.0.0` unless you set it |
+| `GROK_SEARCH_MCP_PORT` | No | `8800` | HTTP port (not 80/8080/6080) |
+| `GROK_SEARCH_MCP_PATH` | No | `/mcp` | HTTP MCP path |
+| `GROK_SEARCH_MCP_TOKEN` | Required for HTTP | - | Inbound Bearer. HTTP only; missing token fail-closes. Do not reuse `GUDA_API_KEY` / Grok / Tavily / Firecrawl keys |
 
 > **Note**: When `GUDA_API_KEY` is set, all `GROK_API_URL`/`GROK_API_KEY`/`TAVILY_*`/`FIRECRAWL_*` variables become optional as they are auto-derived from `GUDA_BASE_URL`. Explicitly set variables take higher priority.
+
+### Optional HTTP MCP (stdio stays default)
+
+The server still defaults to FastMCP `stdio`. For local HTTP:
+
+```bash
+export GROK_SEARCH_MCP_TOKEN="$(openssl rand -hex 32)"
+GROK_SEARCH_MCP_TRANSPORT=http \
+  GROK_SEARCH_MCP_TOKEN="$GROK_SEARCH_MCP_TOKEN" \
+  uv run grok-search
+```
+
+It binds `http://127.0.0.1:8800/mcp` and checks `Authorization: Bearer <GROK_SEARCH_MCP_TOKEN>`. Missing or wrong header returns 401. stdio does not use this token.
+
+`cursor-plugin/` is an in-repo local Cursor plugin example (`type: "http"`, required `variables.GROK_SEARCH_MCP_TOKEN`, `"mcpServers": "./mcp.json"`). It is not a marketplace listing. See `cursor-plugin/README.md`.
 
 ### web_search extras allocation (`extra_sources`)
 
